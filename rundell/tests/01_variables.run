@@ -1,0 +1,24 @@
+define name as string = "Rundell".
+define age  as integer = 5.
+define pi   as float = 3.14.
+define price as currency = 9.99.
+define flag as boolean = true.
+define nothing as integer.
+
+print name + newline().
+print string(age) + newline().
+print string(pi) + newline().
+print string(price) + newline().
+print string(flag) + newline().
+
+if (nothing is null) -->
+    print "nothing is null" + newline().
+<--
+
+# Expected output:
+# Rundell
+# 5
+# 3.14
+# 9.99
+# true
+# nothing is null

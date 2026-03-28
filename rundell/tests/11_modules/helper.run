@@ -1,0 +1,6 @@
+define global GREETING as constant string = "Hello from helper".
+
+define sayHello(name as string) returns null -->
+    print GREETING + ", " + name + "!" + newline().
+    return null.
+<--

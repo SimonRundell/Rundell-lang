@@ -1,0 +1,14 @@
+# Rust build artefacts
+rundell/target/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Claude Code internal memory (not part of the project)
+.claude/
+memory/

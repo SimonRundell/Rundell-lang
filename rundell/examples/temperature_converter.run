@@ -1,0 +1,38 @@
+# temperature_converter.run
+# Converts a temperature between Celsius, Fahrenheit, and Kelvin.
+
+define celsiusToFahrenheit(c as float) returns float -->
+    return c * 9.0 / 5.0 + 32.0.
+<--
+
+define celsiusToKelvin(c as float) returns float -->
+    return c + 273.15.
+<--
+
+define fahrenheitToCelsius(f as float) returns float -->
+    return (f - 32.0) * 5.0 / 9.0.
+<--
+
+define printConversions(celsius as float) returns null -->
+    define fahrenheit as float = celsiusToFahrenheit(celsius).
+    define kelvin     as float = celsiusToKelvin(celsius).
+
+    print string(round(celsius, 2))     + " C  =  "
+        + string(round(fahrenheit, 2))  + " F  =  "
+        + string(round(kelvin, 2))      + " K" + newline().
+    return null.
+<--
+
+# A selection of common reference temperatures
+printConversions(-273.15).    # absolute zero
+printConversions(0.0).        # water freezes
+printConversions(20.0).       # room temperature
+printConversions(37.0).       # body temperature
+printConversions(100.0).      # water boils
+
+# Expected output:
+# -273.15 C  =  -459.67 F  =  0.0 K
+# 0.0 C  =  32.0 F  =  273.15 K
+# 20.0 C  =  68.0 F  =  293.15 K
+# 37.0 C  =  98.60000000000001 F  =  310.15 K
+# 100.0 C  =  212.0 F  =  373.15 K

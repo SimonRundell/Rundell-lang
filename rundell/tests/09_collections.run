@@ -1,0 +1,19 @@
+define data as json = {
+    "items": [
+        { "name": "Apple",  "price": 1.20 },
+        { "name": "Banana", "price": 0.50 }
+    ]
+}.
+
+print data["items"][0]["name"] + newline().
+print string(length(data["items"])) + newline().
+
+for each item in data["items"] -->
+    print item["name"] + newline().
+<--
+
+# Expected output:
+# Apple
+# 2
+# Apple
+# Banana

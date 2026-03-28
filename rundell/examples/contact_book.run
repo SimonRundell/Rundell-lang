@@ -1,0 +1,68 @@
+# contact_book.run
+# A simple in-memory contact book demonstrating collections,
+# functions, loops, and string operations together.
+
+define contacts as json = { "entries": [] }.
+
+# Add a new contact to the list.
+define addContact(name as string, phone as string) returns null -->
+    define entry as json = { "name": "PLACEHOLDER", "phone": "PLACEHOLDER" }.
+    set entry["name"] = name.
+    set entry["phone"] = phone.
+    append(contacts["entries"], entry).
+    return null.
+<--
+
+# Print every contact with a numbered prefix.
+define listContacts() returns null -->
+    define total as integer = length(contacts["entries"]).
+    if (total == 0) -->
+        print "No contacts saved." + newline().
+        return null.
+    <--
+    print "=== Contact Book (" + string(total) + " entries) ===" + newline().
+    define i as integer = 1.
+    for each c in contacts["entries"] -->
+        print string(i) + ".  " + c["name"] + "  -  " + c["phone"] + newline().
+        set i++.
+    <--
+    return null.
+<--
+
+# Find a contact by name (case-insensitive) and print their phone number.
+define findContact(searchName as string) returns null -->
+    define target as string = lower(searchName).
+    define found  as boolean = false.
+    for each c in contacts["entries"] -->
+        if (lower(c["name"]) == target) -->
+            print "Found: " + c["name"] + "  -  " + c["phone"] + newline().
+            set found = true.
+        <--
+    <--
+    if (not found) -->
+        print "No contact named '" + searchName + "' found." + newline().
+    <--
+    return null.
+<--
+
+# ── Demo ──────────────────────────────────────────────────────────
+
+addContact("Alice",   "555-0101").
+addContact("Bob",     "555-0102").
+addContact("Carol",   "555-0103").
+addContact("David",   "555-0104").
+
+listContacts().
+print newline().
+findContact("carol").
+findContact("Eve").
+
+# Expected output:
+# === Contact Book (4 entries) ===
+# 1.  Alice  -  555-0101
+# 2.  Bob    -  555-0102
+# 3.  Carol  -  555-0103
+# 4.  David  -  555-0104
+#
+# Found: Carol  -  555-0103
+# No contact named 'Eve' found.

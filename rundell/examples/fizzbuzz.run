@@ -1,0 +1,17 @@
+# fizzbuzz.run
+# Print 1 to 30. For multiples of 3 print "Fizz", for multiples of
+# 5 print "Buzz", for multiples of both print "FizzBuzz".
+
+define i as integer.
+
+for i loops (1, 30, 1) -->
+    if (i % 15 == 0) -->
+        print "FizzBuzz" + newline().
+    else if (i % 3 == 0) -->
+        print "Fizz" + newline().
+    else if (i % 5 == 0) -->
+        print "Buzz" + newline().
+    else -->
+        print string(i) + newline().
+    <--
+<--

@@ -1,0 +1,4 @@
+# hello_world.run
+# The classic first program.
+
+print "Hello, World!" + newline().

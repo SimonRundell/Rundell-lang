@@ -1,0 +1,19 @@
+define score as integer = 75.
+
+if (score >= 70) -->
+    print "Distinction" + newline().
+else if (score >= 40) -->
+    print "Pass" + newline().
+else -->
+    print "Fail" + newline().
+<--
+
+switch score -->
+    >= 70 : print "Grade A" + newline().
+    >= 40 : print "Grade B" + newline().
+    else  : print "Grade F" + newline().
+<--
+
+# Expected output:
+# Distinction
+# Grade A

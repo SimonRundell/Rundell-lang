@@ -1,0 +1,11 @@
+[package]
+name    = "rundell-interpreter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rundell-parser = { path = "../rundell-parser" }
+rundell-lexer  = { path = "../rundell-lexer"  }
+thiserror      = "1"
+serde_json     = "1"
+serde          = { version = "1", features = ["derive"] }

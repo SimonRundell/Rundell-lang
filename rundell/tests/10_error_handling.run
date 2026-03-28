@@ -1,0 +1,12 @@
+try -->
+    define x as integer.
+    print string(x + 1) + newline().
+catch (NullError) -->
+    print "caught null error" + newline().
+finally -->
+    print "finally ran" + newline().
+<--
+
+# Expected output:
+# caught null error
+# finally ran

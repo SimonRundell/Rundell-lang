@@ -1,0 +1,605 @@
+//! Token definitions for the Rundell language lexer.
+//!
+//! Every syntactic element recognised by the lexer is represented as a
+//! variant of [`Token`].
+
+use logos::{Lexer, Logos};
+
+// ---------------------------------------------------------------------------
+// Helper callbacks
+// ---------------------------------------------------------------------------
+
+/// Parse a decimal integer literal (no sign).
+fn parse_integer(lex: &mut Lexer<Token>) -> Option<i64> {
+    lex.slice().parse().ok()
+}
+
+/// Parse a float literal (digits, decimal point, digits).
+fn parse_float(lex: &mut Lexer<Token>) -> Option<f64> {
+    lex.slice().parse().ok()
+}
+
+/// Parse a currency literal (e.g. `19.99`) into integer cents.
+///
+/// The regex only matches two decimal places, so the math is exact.
+fn parse_currency(lex: &mut Lexer<Token>) -> Option<i64> {
+    let s = lex.slice();
+    // Split on '.'
+    let mut parts = s.splitn(2, '.');
+    let whole: i64 = parts.next()?.parse().ok()?;
+    let frac_str = parts.next().unwrap_or("00");
+    // Pad or truncate to exactly 2 digits
+    let frac_str = if frac_str.len() == 1 {
+        format!("{frac_str}0")
+    } else {
+        frac_str[..2].to_string()
+    };
+    let frac: i64 = frac_str.parse().ok()?;
+    Some(whole * 100 + frac)
+}
+
+/// Unescape a Rundell string literal (strips quotes and resolves escapes).
+fn parse_string(lex: &mut Lexer<Token>) -> Option<String> {
+    let raw = lex.slice();
+    // Determine delimiter from the first character
+    let delim = raw.chars().next()?;
+    // Strip surrounding delimiters
+    let inner = &raw[1..raw.len() - 1];
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next()? {
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                '\'' => out.push('\''),
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                other => {
+                    // Pass through unknown escapes literally
+                    out.push('\\');
+                    out.push(other);
+                }
+            }
+        } else if c == delim {
+            // Should not happen as logos matched the closing delimiter,
+            // but be defensive.
+            break;
+        } else {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
+
+// ---------------------------------------------------------------------------
+// Token enum
+// ---------------------------------------------------------------------------
+
+/// Every token produced by the Rundell lexer.
+#[derive(Logos, Debug, Clone, PartialEq)]
+#[logos(skip r"[ \t\r\n]+")] // skip whitespace
+#[logos(skip r"#[^\n]*")] // skip line comments
+pub enum Token {
+    // -----------------------------------------------------------------------
+    // Literals
+    // -----------------------------------------------------------------------
+    /// A decimal integer literal such as `42`.
+    ///
+    /// MUST come before Float in the source so logos checks it first only
+    /// when there is no decimal point.  The regex excludes strings that
+    /// contain a dot followed by more digits (those are floats).
+    #[regex(r"[0-9]+", parse_integer)]
+    Integer(i64),
+
+    /// A floating-point literal such as `3.14`.
+    ///
+    /// The decimal point is only a decimal point when it is surrounded by
+    /// digits on both sides (disambiguation rule §1.3).
+    #[regex(r"[0-9]+\.[0-9]+", parse_float, priority = 3)]
+    Float(f64),
+
+    /// A currency literal with exactly two decimal places, e.g. `19.99`.
+    ///
+    /// Stored internally as integer cents to avoid floating-point error.
+    /// The lexer regex is *identical* to Float but with higher priority so
+    /// it is tried first; the callback checks the fractional-digit count.
+    // NOTE: logos picks the longest match.  We distinguish Currency from
+    // Float at a higher level; both use the same regex.  We keep Currency
+    // as a separate variant so the parser can emit it directly.
+    // In practice the lexer will emit Float for 3.14 and Currency for 9.99
+    // — they share a regex so logos would only keep one.  We therefore
+    // handle this in the parser/lexer post-processing: everything that
+    // looks like  d+.dd  with exactly 2 fractional digits is ambiguous.
+    // To keep the lexer simple we emit only Float(f64) from regex and
+    // convert to Currency in the parser when the declared type is currency.
+    // However, the spec says CurrencyLit(i64) should be a token.  We
+    // resolve this by giving the 2-dp regex higher priority.
+    #[regex(r"[0-9]+\.[0-9]{2}", parse_currency, priority = 4)]
+    CurrencyLit(i64),
+
+    /// A string literal delimited by `"` or `'`.  Escape sequences are
+    /// already resolved; the stored value is the logical string content.
+    #[regex(r#""([^"\\]|\\.|\n)*""#, parse_string)]
+    #[regex(r#"'([^'\\]|\\.|\n)*'"#, parse_string)]
+    StringLit(String),
+
+    /// Boolean `true` (matches `true`, `TRUE`, `yes`, `YES`).
+    #[token("true")]
+    #[token("TRUE")]
+    #[token("yes")]
+    #[token("YES")]
+    BoolTrue,
+
+    /// Boolean `false` (matches `false`, `FALSE`, `no`, `NO`).
+    #[token("false")]
+    #[token("FALSE")]
+    #[token("no")]
+    #[token("NO")]
+    BoolFalse,
+
+    // -----------------------------------------------------------------------
+    // Keywords
+    // -----------------------------------------------------------------------
+    /// `define`
+    #[token("define")]
+    Define,
+    /// `as`
+    #[token("as")]
+    As,
+    /// `constant`
+    #[token("constant")]
+    Constant,
+    /// `global`
+    #[token("global")]
+    Global,
+    /// `set`
+    #[token("set")]
+    Set,
+    /// `return`
+    #[token("return")]
+    Return,
+    /// `import`
+    #[token("import")]
+    Import,
+
+    /// `if`
+    #[token("if")]
+    If,
+    /// `else`
+    #[token("else")]
+    Else,
+    /// `switch`
+    #[token("switch")]
+    Switch,
+    /// `for`
+    #[token("for")]
+    For,
+    /// `while`
+    #[token("while")]
+    While,
+    /// `each`
+    #[token("each")]
+    Each,
+    /// `in`
+    #[token("in")]
+    In,
+    /// `loops`
+    #[token("loops")]
+    Loops,
+
+    /// `and`
+    #[token("and")]
+    And,
+    /// `or`
+    #[token("or")]
+    Or,
+    /// `not`
+    #[token("not")]
+    Not,
+    /// `is`
+    #[token("is")]
+    Is,
+
+    /// `null`
+    #[token("null")]
+    Null,
+
+    /// `print`
+    #[token("print")]
+    Print,
+    /// `receive`
+    #[token("receive")]
+    Receive,
+    /// `with`
+    #[token("with")]
+    With,
+    /// `prompt`
+    #[token("prompt")]
+    Prompt,
+
+    /// `try`
+    #[token("try")]
+    Try,
+    /// `catch`
+    #[token("catch")]
+    Catch,
+    /// `finally`
+    #[token("finally")]
+    Finally,
+
+    /// `integer` type keyword
+    #[token("integer")]
+    KwInteger,
+    /// `float` type keyword
+    #[token("float")]
+    KwFloat,
+    /// `string` type keyword / built-in
+    #[token("string")]
+    KwString,
+    /// `currency` type keyword
+    #[token("currency")]
+    KwCurrency,
+    /// `boolean` type keyword
+    #[token("boolean")]
+    KwBoolean,
+    /// `json` type keyword
+    #[token("json")]
+    KwJson,
+
+    /// `cast` built-in
+    #[token("cast")]
+    Cast,
+    /// `length` built-in
+    #[token("length")]
+    Length,
+    /// `newline` built-in
+    #[token("newline")]
+    Newline,
+    /// `abs` built-in
+    #[token("abs")]
+    Abs,
+    /// `floor` built-in
+    #[token("floor")]
+    Floor,
+    /// `ceil` built-in
+    #[token("ceil")]
+    Ceil,
+    /// `round` built-in
+    #[token("round")]
+    Round,
+    /// `substr` built-in
+    #[token("substr")]
+    Substr,
+    /// `upper` built-in
+    #[token("upper")]
+    Upper,
+    /// `lower` built-in
+    #[token("lower")]
+    Lower,
+    /// `trim` built-in
+    #[token("trim")]
+    Trim,
+    /// `append` built-in / statement
+    #[token("append")]
+    Append,
+    /// `remove` statement
+    #[token("remove")]
+    Remove,
+
+    /// `returns`
+    #[token("returns")]
+    Returns,
+
+    /// `TypeError` error-type keyword
+    #[token("TypeError")]
+    KwTypeError,
+    /// `NullError` error-type keyword
+    #[token("NullError")]
+    KwNullError,
+    /// `IndexError` error-type keyword
+    #[token("IndexError")]
+    KwIndexError,
+    /// `DivisionError` error-type keyword
+    #[token("DivisionError")]
+    KwDivisionError,
+    /// `IOError` error-type keyword
+    #[token("IOError")]
+    KwIOError,
+    /// `RuntimeError` error-type keyword
+    #[token("RuntimeError")]
+    KwRuntimeError,
+
+    // -----------------------------------------------------------------------
+    // Operators and punctuation
+    // -----------------------------------------------------------------------
+    /// `++`
+    #[token("++")]
+    PlusPlus,
+    /// `--`
+    #[token("--")]
+    MinusMinus,
+    /// `**`
+    #[token("**")]
+    StarStar,
+    /// `+`
+    #[token("+")]
+    Plus,
+    /// `-`
+    #[token("-")]
+    Minus,
+    /// `*`
+    #[token("*")]
+    Star,
+    /// `/`
+    #[token("/")]
+    Slash,
+    /// `%`
+    #[token("%")]
+    Percent,
+
+    /// `==`
+    #[token("==")]
+    EqEq,
+    /// `!=`
+    #[token("!=")]
+    BangEq,
+    /// `<=`
+    #[token("<=")]
+    LtEq,
+    /// `>=`
+    #[token(">=")]
+    GtEq,
+    /// `<--`  (end-of-block marker)
+    #[token("<--")]
+    ArrowEnd,
+    /// `<`
+    #[token("<")]
+    Lt,
+    /// `>`
+    #[token(">")]
+    Gt,
+    /// `=`
+    #[token("=")]
+    Eq,
+
+    /// `-->`  (start-of-block marker)
+    #[token("-->")]
+    Arrow,
+
+    /// `(`
+    #[token("(")]
+    LParen,
+    /// `)`
+    #[token(")")]
+    RParen,
+    /// `[`
+    #[token("[")]
+    LBracket,
+    /// `]`
+    #[token("]")]
+    RBracket,
+    /// `{`
+    #[token("{")]
+    LBrace,
+    /// `}`
+    #[token("}")]
+    RBrace,
+
+    /// `,`
+    #[token(",")]
+    Comma,
+    /// `:`
+    #[token(":")]
+    Colon,
+    /// `.`  (statement terminator)
+    #[token(".")]
+    Dot,
+
+    // -----------------------------------------------------------------------
+    // Identifier (must come AFTER all keywords)
+    // -----------------------------------------------------------------------
+    /// A user-defined identifier.
+    ///
+    /// Must start with a letter; subsequent characters may be alphanumeric
+    /// or underscore. Leading underscores are forbidden per spec §1.5.
+    #[regex(r"[a-zA-Z][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
+    Ident(String),
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lex;
+
+    fn tokens(src: &str) -> Vec<Token> {
+        lex(src).unwrap().into_iter().map(|(t, _)| t).collect()
+    }
+
+    #[test]
+    fn integer_literal() {
+        assert_eq!(tokens("42"), vec![Token::Integer(42)]);
+    }
+
+    #[test]
+    fn float_literal() {
+        // 3.14 — decimal point is part of the number
+        let toks = tokens("3.14");
+        // logos will prefer CurrencyLit for exactly 2 dp; 3.14 has 2 dp
+        // We accept either Float or CurrencyLit here; the parser will
+        // canonicalise. But the key point is it is NOT split into 3 Dot 14.
+        assert_eq!(toks.len(), 1, "must be a single token, got {:?}", toks);
+    }
+
+    #[test]
+    fn float_three_dp() {
+        let toks = tokens("3.333");
+        assert_eq!(toks, vec![Token::Float(3.333)]);
+    }
+
+    #[test]
+    fn string_double_quote() {
+        assert_eq!(
+            tokens(r#""hello""#),
+            vec![Token::StringLit("hello".to_string())]
+        );
+    }
+
+    #[test]
+    fn string_single_quote() {
+        assert_eq!(
+            tokens("'hello'"),
+            vec![Token::StringLit("hello".to_string())]
+        );
+    }
+
+    #[test]
+    fn string_escape_sequences() {
+        // \n -> newline, \r -> CR, \t -> tab, \\ -> backslash, \" -> quote, \' -> single quote
+        let toks = tokens(r#""\n\r\t\\\"\'""#);
+        assert_eq!(toks, vec![Token::StringLit("\n\r\t\\\"'".to_string())]);
+    }
+
+    #[test]
+    fn string_opposite_delimiter_inside() {
+        let toks = tokens(r#""it's here""#);
+        assert_eq!(toks, vec![Token::StringLit("it's here".to_string())]);
+    }
+
+    #[test]
+    fn currency_literal() {
+        assert_eq!(tokens("19.99"), vec![Token::CurrencyLit(1999)]);
+        assert_eq!(tokens("1000.00"), vec![Token::CurrencyLit(100000)]);
+    }
+
+    #[test]
+    fn bool_true_variants() {
+        for s in &["true", "TRUE", "yes", "YES"] {
+            assert_eq!(tokens(s), vec![Token::BoolTrue], "failed for {s}");
+        }
+    }
+
+    #[test]
+    fn bool_false_variants() {
+        for s in &["false", "FALSE", "no", "NO"] {
+            assert_eq!(tokens(s), vec![Token::BoolFalse], "failed for {s}");
+        }
+    }
+
+    #[test]
+    fn all_keywords() {
+        let cases: &[(&str, Token)] = &[
+            ("define", Token::Define),
+            ("as", Token::As),
+            ("constant", Token::Constant),
+            ("global", Token::Global),
+            ("set", Token::Set),
+            ("return", Token::Return),
+            ("import", Token::Import),
+            ("if", Token::If),
+            ("else", Token::Else),
+            ("switch", Token::Switch),
+            ("for", Token::For),
+            ("while", Token::While),
+            ("each", Token::Each),
+            ("in", Token::In),
+            ("loops", Token::Loops),
+            ("and", Token::And),
+            ("or", Token::Or),
+            ("not", Token::Not),
+            ("is", Token::Is),
+            ("null", Token::Null),
+            ("print", Token::Print),
+            ("receive", Token::Receive),
+            ("with", Token::With),
+            ("prompt", Token::Prompt),
+            ("try", Token::Try),
+            ("catch", Token::Catch),
+            ("finally", Token::Finally),
+            ("integer", Token::KwInteger),
+            ("float", Token::KwFloat),
+            ("string", Token::KwString),
+            ("currency", Token::KwCurrency),
+            ("boolean", Token::KwBoolean),
+            ("json", Token::KwJson),
+            ("cast", Token::Cast),
+            ("length", Token::Length),
+            ("newline", Token::Newline),
+            ("abs", Token::Abs),
+            ("floor", Token::Floor),
+            ("ceil", Token::Ceil),
+            ("round", Token::Round),
+            ("substr", Token::Substr),
+            ("upper", Token::Upper),
+            ("lower", Token::Lower),
+            ("trim", Token::Trim),
+            ("append", Token::Append),
+            ("remove", Token::Remove),
+            ("returns", Token::Returns),
+            ("TypeError", Token::KwTypeError),
+            ("NullError", Token::KwNullError),
+            ("IndexError", Token::KwIndexError),
+            ("DivisionError", Token::KwDivisionError),
+            ("IOError", Token::KwIOError),
+            ("RuntimeError", Token::KwRuntimeError),
+        ];
+        for (src, expected) in cases {
+            assert_eq!(tokens(src), vec![expected.clone()], "keyword: {src}");
+        }
+    }
+
+    #[test]
+    fn identifier() {
+        assert_eq!(tokens("myVar"), vec![Token::Ident("myVar".to_string())]);
+        assert_eq!(
+            tokens("camelCase123"),
+            vec![Token::Ident("camelCase123".to_string())]
+        );
+    }
+
+    #[test]
+    fn arrow_tokens() {
+        assert_eq!(tokens("-->"), vec![Token::Arrow]);
+        assert_eq!(tokens("<--"), vec![Token::ArrowEnd]);
+    }
+
+    #[test]
+    fn comment_is_skipped() {
+        let toks = tokens("42 # this is a comment\n99");
+        assert_eq!(toks, vec![Token::Integer(42), Token::Integer(99)]);
+    }
+
+    #[test]
+    fn multiline_statement() {
+        // define x \n as integer = 5.
+        let toks = tokens("define x\nas integer = 5.");
+        assert_eq!(
+            toks,
+            vec![
+                Token::Define,
+                Token::Ident("x".to_string()),
+                Token::As,
+                Token::KwInteger,
+                Token::Eq,
+                Token::Integer(5),
+                Token::Dot,
+            ]
+        );
+    }
+
+    #[test]
+    fn decimal_point_vs_terminator() {
+        // define f as float = 3.14.
+        // The 3.14 must be one token; the trailing . is a Dot
+        let toks = tokens("define f as float = 3.14.");
+        // 3.14 has exactly 2 decimal digits → CurrencyLit from our regex
+        // We expect exactly 6 tokens: Define, Ident, As, KwFloat, Eq, <num>, Dot
+        assert_eq!(toks.len(), 7, "tokens: {:?}", toks);
+        assert_eq!(toks[6], Token::Dot);
+    }
+}

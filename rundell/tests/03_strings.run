@@ -1,0 +1,15 @@
+define s as string = "Hello, World!".
+print s + newline().
+print string(length(s)) + newline().
+print upper(s) + newline().
+print lower(s) + newline().
+print substr(s, 0, 5) + newline().
+print trim("  spaced  ") + newline().
+
+# Expected output:
+# Hello, World!
+# 13
+# HELLO, WORLD!
+# hello, world!
+# Hello
+# spaced

@@ -1,0 +1,51 @@
+# error_handling_demo.run
+# Shows try/catch/finally for each common error type.
+
+# ── 1. TypeError ─────────────────────────────────────────────────
+print "--- TypeError ---" + newline().
+
+try -->
+    define bad as integer = cast("not a number", integer).
+catch (TypeError) -->
+    print "Caught TypeError: could not cast string to integer." + newline().
+finally -->
+    print "Finally ran." + newline().
+<--
+
+print newline().
+
+# ── 2. NullError ─────────────────────────────────────────────────
+print "--- NullError ---" + newline().
+
+try -->
+    define x as integer.
+    define y as integer = x + 1.   # x is null — NullError
+    print string(y) + newline().
+catch (NullError) -->
+    print "Caught NullError: used a null variable." + newline().
+<--
+
+print newline().
+
+# ── 3. DivisionError ─────────────────────────────────────────────
+print "--- DivisionError ---" + newline().
+
+try -->
+    define a as integer = 10.
+    define b as integer = 0.
+    print string(a / b) + newline().
+catch (DivisionError) -->
+    print "Caught DivisionError: division by zero." + newline().
+<--
+
+print newline().
+
+# ── 4. IndexError ────────────────────────────────────────────────
+print "--- IndexError ---" + newline().
+
+try -->
+    define arr as json = { "items": [1, 2, 3] }.
+    print string(arr["items"][99]) + newline().   # index 99 does not exist
+catch (IndexError) -->
+    print "Caught IndexError: index out of bounds." + newline().
+<--

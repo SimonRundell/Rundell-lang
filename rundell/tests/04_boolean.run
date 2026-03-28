@@ -1,0 +1,20 @@
+define t as boolean = true.
+define f as boolean = FALSE.
+define y as boolean = yes.
+define n as boolean = no.
+
+print string(t) + newline().
+print string(f) + newline().
+print string(y) + newline().
+print string(n) + newline().
+
+if (t and not f) -->
+    print "logic works" + newline().
+<--
+
+# Expected output:
+# true
+# false
+# true
+# false
+# logic works

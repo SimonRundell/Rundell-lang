@@ -1,0 +1,16 @@
+[package]
+name    = "rundell-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rundell"
+path = "src/main.rs"
+
+[dependencies]
+rundell-interpreter = { path = "../rundell-interpreter" }
+rundell-parser      = { path = "../rundell-parser"      }
+rundell-lexer       = { path = "../rundell-lexer"       }
+rustyline           = "14"
+miette              = { version = "7", features = ["fancy"] }
+clap                = { version = "4", features = ["derive"] }

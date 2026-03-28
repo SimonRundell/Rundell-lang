@@ -1,0 +1,1739 @@
+//! Tree-walk evaluator for the Rundell language.
+//!
+//! The [`Interpreter`] struct walks the AST produced by `rundell-parser`
+//! and executes each node, maintaining an [`Environment`] for variable
+//! storage.
+
+use std::collections::HashMap;
+use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
+
+use rundell_parser::ast::{
+    BinOp, CmpOp, DefineStmt, Expr, ForEachStmt, ForLoopStmt, FunctionDefStmt, IfStmt, Literal,
+    ReceiveStmt, RundellType, SetOp, SetStmt, SetTarget, Stmt, SwitchPattern, TryCatchStmt,
+    UnaryOp, WhileLoopStmt,
+};
+use rundell_parser::parse;
+
+use crate::environment::Environment;
+use crate::error::RuntimeError;
+
+// ---------------------------------------------------------------------------
+// Value type
+// ---------------------------------------------------------------------------
+
+/// A runtime value in the Rundell interpreter.
+#[derive(Debug, Clone)]
+pub enum Value {
+    /// 64-bit signed integer.
+    Integer(i64),
+    /// 64-bit IEEE 754 double.
+    Float(f64),
+    /// UTF-8 string.
+    Str(String),
+    /// Fixed-point currency stored as integer cents.
+    Currency(i64),
+    /// Boolean.
+    Boolean(bool),
+    /// JSON collection.
+    Json(serde_json::Value),
+    /// The null / uninitialised value.
+    Null,
+}
+
+impl Value {
+    /// Return a static string naming the type of this value.
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Value::Integer(_) => "integer",
+            Value::Float(_) => "float",
+            Value::Str(_) => "string",
+            Value::Currency(_) => "currency",
+            Value::Boolean(_) => "boolean",
+            Value::Json(_) => "json",
+            Value::Null => "null",
+        }
+    }
+
+    /// Convert the value to its human-readable string representation.
+    ///
+    /// - Currency: always exactly 2 decimal places.
+    /// - Boolean: lowercase `"true"` / `"false"`.
+    /// - Float: Rust default Display (no trailing zeros removed; no forced dp).
+    pub fn to_display_string(&self) -> String {
+        match self {
+            Value::Integer(n) => n.to_string(),
+            Value::Float(f) => {
+                // Use Rust's default float display but ensure at least one
+                // decimal place so that 42.0 does not display as "42".
+                let s = format!("{f}");
+                if s.contains('.') || s.contains('e') || s.contains('E') {
+                    s
+                } else {
+                    format!("{s}.0")
+                }
+            }
+            Value::Str(s) => s.clone(),
+            Value::Currency(c) => {
+                let whole = c / 100;
+                let frac = (c % 100).unsigned_abs();
+                format!("{whole}.{frac:02}")
+            }
+            Value::Boolean(b) => if *b { "true" } else { "false" }.to_string(),
+            Value::Json(v) => v.to_string(),
+            Value::Null => "null".to_string(),
+        }
+    }
+
+    /// Evaluate the truthiness of a value.
+    ///
+    /// - `Null` → false
+    /// - Numbers → non-zero is true
+    /// - String → non-empty is true
+    /// - Boolean → direct
+    /// - Json → always true
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Value::Integer(n) => *n != 0,
+            Value::Float(f) => *f != 0.0,
+            Value::Boolean(b) => *b,
+            Value::Currency(c) => *c != 0,
+            Value::Str(s) => !s.is_empty(),
+            Value::Json(_) => true,
+            Value::Null => false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Interpreter
+// ---------------------------------------------------------------------------
+
+/// The Rundell tree-walk interpreter.
+///
+/// Holds the environment (symbol table), registered functions, and
+/// metadata needed for import path resolution.
+pub struct Interpreter {
+    /// Variable environment (scoped symbol table).
+    pub(crate) env: Environment,
+    /// Map of declared functions by name.
+    pub(crate) functions: HashMap<String, FunctionDefStmt>,
+    /// Directory of the current source file (for import resolution).
+    pub(crate) source_dir: PathBuf,
+    /// Set of source file paths already being imported (cycle detection).
+    pub(crate) import_stack: Vec<PathBuf>,
+    /// Stdout writer (allows substitution in tests).
+    stdout: Box<dyn Write>,
+    /// Stdin reader (allows substitution in tests).
+    stdin: Box<dyn BufRead>,
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Interpreter {
+    /// Create a new interpreter with fresh state.
+    pub fn new() -> Self {
+        Interpreter {
+            env: Environment::new(),
+            functions: HashMap::new(),
+            source_dir: PathBuf::new(),
+            import_stack: Vec::new(),
+            stdout: Box::new(io::stdout()),
+            stdin: Box::new(io::BufReader::new(io::stdin())),
+        }
+    }
+
+    /// Create an interpreter that writes to a provided `Write` (for testing).
+    pub fn new_with_output(out: Box<dyn Write>) -> Self {
+        Interpreter {
+            env: Environment::new(),
+            functions: HashMap::new(),
+            source_dir: PathBuf::new(),
+            import_stack: Vec::new(),
+            stdout: out,
+            stdin: Box::new(io::BufReader::new(io::stdin())),
+        }
+    }
+
+    /// Set the directory used to resolve imports (should be the directory of
+    /// the source file being executed).
+    pub fn set_source_dir(&mut self, dir: PathBuf) {
+        self.source_dir = dir;
+    }
+
+    /// Execute a program (list of statements).
+    pub fn run(&mut self, stmts: Vec<Stmt>) -> Result<(), RuntimeError> {
+        for stmt in stmts {
+            self.exec_stmt(stmt)?;
+        }
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Statement execution
+    // -----------------------------------------------------------------------
+
+    /// Execute a single statement.
+    fn exec_stmt(&mut self, stmt: Stmt) -> Result<(), RuntimeError> {
+        match stmt {
+            Stmt::Import(path) => self.exec_import(&path),
+            Stmt::Define(d) => self.exec_define(d),
+            Stmt::Set(s) => self.exec_set(s),
+            Stmt::Print(expr) => self.exec_print(expr),
+            Stmt::Receive(r) => self.exec_receive(r),
+            Stmt::If(i) => self.exec_if(i),
+            Stmt::Switch(sw) => self.exec_switch(sw),
+            Stmt::ForLoop(fl) => self.exec_for(fl),
+            Stmt::WhileLoop(wl) => self.exec_while(wl),
+            Stmt::ForEach(fe) => self.exec_foreach(fe),
+            Stmt::FunctionDef(fd) => {
+                // Register the function; don't execute the body yet.
+                self.functions.insert(fd.name.clone(), fd);
+                Ok(())
+            }
+            Stmt::Return(expr) => {
+                let val = match expr {
+                    Some(e) => Some(self.eval_expr(e)?),
+                    None => None,
+                };
+                Err(RuntimeError::ReturnValue(val))
+            }
+            Stmt::TryCatch(tc) => self.exec_try(tc),
+            Stmt::Remove(expr) => self.exec_remove(expr),
+            Stmt::Append(col, val) => {
+                self.exec_append(col, val)?;
+                Ok(())
+            }
+            Stmt::ExprStmt(expr) => {
+                self.eval_expr(expr)?;
+                Ok(())
+            }
+        }
+    }
+
+    // Import a module.
+    fn exec_import(&mut self, path: &str) -> Result<(), RuntimeError> {
+        let mut full_path = self.source_dir.clone();
+        full_path.push(format!("{path}.run"));
+        let canonical = full_path
+            .canonicalize()
+            .map_err(|e| RuntimeError::IOError(format!("cannot resolve import '{path}': {e}")))?;
+        // Cycle detection
+        if self.import_stack.contains(&canonical) {
+            return Err(RuntimeError::RuntimeError(format!(
+                "Circular import detected: {path}"
+            )));
+        }
+        let source = std::fs::read_to_string(&canonical)
+            .map_err(|e| RuntimeError::IOError(format!("cannot read import '{path}': {e}")))?;
+        let stmts = parse(&source).map_err(|e| {
+            RuntimeError::RuntimeError(format!("parse error in import '{path}': {e}"))
+        })?;
+
+        self.import_stack.push(canonical.clone());
+        let old_dir = self.source_dir.clone();
+        self.source_dir = canonical.parent().unwrap_or(Path::new(".")).to_path_buf();
+
+        // Only execute globals and function definitions from the import.
+        for stmt in stmts {
+            match stmt {
+                Stmt::Define(ref d) if d.global => {
+                    self.exec_define_global(d.clone())?;
+                }
+                Stmt::FunctionDef(fd) => {
+                    self.functions.insert(fd.name.clone(), fd);
+                }
+                _ => {}
+            }
+        }
+
+        self.source_dir = old_dir;
+        self.import_stack.pop();
+        Ok(())
+    }
+
+    /// Execute a global variable declaration (for imports).
+    fn exec_define_global(&mut self, d: DefineStmt) -> Result<(), RuntimeError> {
+        let val = match d.init {
+            Some(e) => {
+                let v = self.eval_expr(e)?;
+                coerce_to_declared_type(v, &d.typ)
+            }
+            None => Value::Null,
+        };
+        self.env.define_global(&d.name, val, d.typ, d.constant)
+    }
+
+    fn exec_define(&mut self, d: DefineStmt) -> Result<(), RuntimeError> {
+        if d.global {
+            return self.exec_define_global(d);
+        }
+        let val = match d.init {
+            Some(e) => {
+                let v = self.eval_expr(e)?;
+                coerce_to_declared_type(v, &d.typ)
+            }
+            None => Value::Null,
+        };
+        self.env.define(&d.name, val, d.typ, d.constant)
+    }
+
+    fn exec_set(&mut self, s: SetStmt) -> Result<(), RuntimeError> {
+        match s.target {
+            SetTarget::Identifier(name) => match s.op {
+                SetOp::Assign(expr) => {
+                    let val = self.eval_expr(expr)?;
+                    self.env.set(&name, val)
+                }
+                SetOp::Increment => {
+                    let cur = self.env.get(&name)?.clone();
+                    match cur {
+                        Value::Integer(n) => self.env.set(&name, Value::Integer(n + 1)),
+                        _ => Err(RuntimeError::TypeError(
+                            "++ only valid on integer variables".to_string(),
+                        )),
+                    }
+                }
+                SetOp::Decrement => {
+                    let cur = self.env.get(&name)?.clone();
+                    match cur {
+                        Value::Integer(n) => self.env.set(&name, Value::Integer(n - 1)),
+                        _ => Err(RuntimeError::TypeError(
+                            "-- only valid on integer variables".to_string(),
+                        )),
+                    }
+                }
+            },
+            SetTarget::Index(col_expr, key_expr) => {
+                // Evaluate new value first
+                let new_val = match s.op {
+                    SetOp::Assign(expr) => self.eval_expr(expr)?,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "++ / -- not valid on collection elements".to_string(),
+                        ))
+                    }
+                };
+                // col_expr should resolve to an Identifier ultimately
+                self.set_index(*col_expr, *key_expr, new_val)
+            }
+        }
+    }
+
+    /// Recursively set a value into a nested JSON collection.
+    fn set_index(
+        &mut self,
+        col_expr: Expr,
+        key_expr: Expr,
+        new_val: Value,
+    ) -> Result<(), RuntimeError> {
+        let key = self.eval_expr(key_expr)?;
+
+        // Find the root identifier for mutation
+        let root_name = Self::find_root_ident(&col_expr)?;
+
+        // Clone the current JSON value
+        let mut root_json = match self.env.get(&root_name)?.clone() {
+            Value::Json(j) => j,
+            _ => {
+                return Err(RuntimeError::TypeError(
+                    "index assignment target is not a json collection".to_string(),
+                ))
+            }
+        };
+
+        // Build a path of keys from the expression
+        let mut path = Vec::new();
+        Self::collect_index_path(&col_expr, &mut path);
+
+        // Navigate to the parent and insert
+        let json_val = value_to_json(new_val)?;
+        Self::json_set_nested(&mut root_json, &path, key, json_val)?;
+
+        self.env.set(&root_name, Value::Json(root_json))
+    }
+
+    fn find_root_ident(expr: &Expr) -> Result<String, RuntimeError> {
+        match expr {
+            Expr::Identifier(name) => Ok(name.clone()),
+            Expr::Index(inner, _) => Self::find_root_ident(inner),
+            _ => Err(RuntimeError::TypeError(
+                "set target must be an identifier or index expression".to_string(),
+            )),
+        }
+    }
+
+    fn collect_index_path(expr: &Expr, path: &mut Vec<Expr>) {
+        if let Expr::Index(inner, key) = expr {
+            Self::collect_index_path(inner, path);
+            path.push(*key.clone());
+        }
+    }
+
+    fn json_set_nested(
+        json: &mut serde_json::Value,
+        path: &[Expr],
+        final_key: Value,
+        new_val: serde_json::Value,
+    ) -> Result<(), RuntimeError> {
+        // We need to evaluate the path keys — but this fn doesn't have &mut self.
+        // We pre-evaluate them in exec_set; here the path elements are already
+        // literals, or we fall back to treating Expr::Literal.
+        // For simplicity, navigate with already-evaluated keys.
+        let full_path: Vec<Value> = {
+            let mut p = Vec::new();
+            for e in path {
+                p.push(Self::eval_expr_simple(e)?);
+            }
+            p.push(final_key);
+            p
+        };
+        Self::json_navigate_and_set(json, &full_path, new_val)
+    }
+
+    /// Evaluate simple (non-identifier, non-call) expressions for path navigation.
+    fn eval_expr_simple(expr: &Expr) -> Result<Value, RuntimeError> {
+        match expr {
+            Expr::Literal(lit) => Ok(literal_to_value(lit.clone())),
+            _ => Err(RuntimeError::RuntimeError(
+                "complex index paths not supported in set target".to_string(),
+            )),
+        }
+    }
+
+    fn json_navigate_and_set(
+        json: &mut serde_json::Value,
+        keys: &[Value],
+        new_val: serde_json::Value,
+    ) -> Result<(), RuntimeError> {
+        if keys.is_empty() {
+            return Err(RuntimeError::RuntimeError("empty index path".to_string()));
+        }
+        if keys.len() == 1 {
+            return Self::json_set_one(json, &keys[0], new_val);
+        }
+        let next = Self::json_get_mut(json, &keys[0])?;
+        Self::json_navigate_and_set(next, &keys[1..], new_val)
+    }
+
+    fn json_set_one(
+        json: &mut serde_json::Value,
+        key: &Value,
+        new_val: serde_json::Value,
+    ) -> Result<(), RuntimeError> {
+        match (json, key) {
+            (serde_json::Value::Object(map), Value::Str(k)) => {
+                map.insert(k.clone(), new_val);
+                Ok(())
+            }
+            (serde_json::Value::Array(arr), Value::Integer(i)) => {
+                let idx = *i as usize;
+                if idx < arr.len() {
+                    arr[idx] = new_val;
+                    Ok(())
+                } else {
+                    Err(RuntimeError::IndexError(format!("index {i} out of bounds")))
+                }
+            }
+            _ => Err(RuntimeError::TypeError(
+                "incompatible collection/key types".to_string(),
+            )),
+        }
+    }
+
+    fn json_get_mut<'a>(
+        json: &'a mut serde_json::Value,
+        key: &Value,
+    ) -> Result<&'a mut serde_json::Value, RuntimeError> {
+        match (json, key) {
+            (serde_json::Value::Object(map), Value::Str(k)) => map
+                .get_mut(k.as_str())
+                .ok_or_else(|| RuntimeError::IndexError(format!("key '{k}' not found"))),
+            (serde_json::Value::Array(arr), Value::Integer(i)) => {
+                let idx = *i as usize;
+                arr.get_mut(idx)
+                    .ok_or_else(|| RuntimeError::IndexError(format!("index {i} out of bounds")))
+            }
+            _ => Err(RuntimeError::TypeError(
+                "incompatible collection/key types".to_string(),
+            )),
+        }
+    }
+
+    fn exec_print(&mut self, expr: Expr) -> Result<(), RuntimeError> {
+        let val = self.eval_expr(expr)?;
+        let s = val.to_display_string();
+        self.stdout
+            .write_all(s.as_bytes())
+            .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+        self.stdout
+            .flush()
+            .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+        Ok(())
+    }
+
+    fn exec_receive(&mut self, r: ReceiveStmt) -> Result<(), RuntimeError> {
+        // Print prompt if present
+        if let Some(prompt_expr) = r.prompt {
+            let prompt_val = self.eval_expr(prompt_expr)?;
+            let prompt_str = prompt_val.to_display_string();
+            self.stdout
+                .write_all(prompt_str.as_bytes())
+                .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+            self.stdout
+                .flush()
+                .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+        }
+        // Read a line from stdin
+        let mut line = String::new();
+        self.stdin
+            .read_line(&mut line)
+            .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+        let line = line.trim_end_matches(['\n', '\r']).to_string();
+
+        // Coerce to the variable's declared type
+        let binding = self.env.get_binding(&r.variable)?.clone();
+        let val = coerce_string_to_type(&line, &binding.declared_type)?;
+        self.env.set(&r.variable, val)
+    }
+
+    fn exec_if(&mut self, i: IfStmt) -> Result<(), RuntimeError> {
+        let cond = self.eval_expr(i.condition)?;
+        if cond.is_truthy() {
+            self.env.push_scope();
+            let res = self.run_body(i.then_body);
+            self.env.pop_scope();
+            return res;
+        }
+        for (else_cond, else_body) in i.else_ifs {
+            let c = self.eval_expr(else_cond)?;
+            if c.is_truthy() {
+                self.env.push_scope();
+                let res = self.run_body(else_body);
+                self.env.pop_scope();
+                return res;
+            }
+        }
+        if let Some(else_body) = i.else_body {
+            self.env.push_scope();
+            let res = self.run_body(else_body);
+            self.env.pop_scope();
+            return res;
+        }
+        Ok(())
+    }
+
+    fn exec_switch(&mut self, sw: rundell_parser::ast::SwitchStmt) -> Result<(), RuntimeError> {
+        let subject = self.eval_expr(sw.subject)?;
+
+        // Collect the indices of cases that have non-empty bodies.
+        // For grouped cases (empty body) we fall through to the next non-empty body.
+        let n = sw.cases.len();
+        let mut i = 0;
+        while i < n {
+            let case = &sw.cases[i];
+            let matches = self.switch_case_matches(&subject, &case.pattern)?;
+            if matches {
+                // Find the first case in the group with a non-empty body.
+                let mut j = i;
+                while j < n && sw.cases[j].body.is_empty() {
+                    j += 1;
+                }
+                if j < n {
+                    let body = sw.cases[j].body.clone();
+                    self.env.push_scope();
+                    let res = self.run_body(body);
+                    self.env.pop_scope();
+                    return res;
+                }
+                return Ok(());
+            }
+            i += 1;
+        }
+        Ok(())
+    }
+
+    /// Test whether `subject` matches a switch case pattern.
+    fn switch_case_matches(
+        &mut self,
+        subject: &Value,
+        pattern: &SwitchPattern,
+    ) -> Result<bool, RuntimeError> {
+        match pattern {
+            SwitchPattern::Default => Ok(true),
+            SwitchPattern::Exact(expr) => {
+                let val = self.eval_expr(expr.clone())?;
+                Ok(values_equal(subject, &val))
+            }
+            SwitchPattern::Comparison(op, expr) => {
+                let val = self.eval_expr(expr.clone())?;
+                compare_values(subject, op, &val)
+            }
+        }
+    }
+
+    fn exec_for(&mut self, fl: ForLoopStmt) -> Result<(), RuntimeError> {
+        let start = match self.eval_expr(fl.start)? {
+            Value::Integer(n) => n,
+            v => {
+                return Err(RuntimeError::TypeError(format!(
+                    "for loop start must be integer, got {}",
+                    v.type_name()
+                )))
+            }
+        };
+        let end = match self.eval_expr(fl.end)? {
+            Value::Integer(n) => n,
+            v => {
+                return Err(RuntimeError::TypeError(format!(
+                    "for loop end must be integer, got {}",
+                    v.type_name()
+                )))
+            }
+        };
+        let step = match self.eval_expr(fl.increment)? {
+            Value::Integer(n) => n,
+            v => {
+                return Err(RuntimeError::TypeError(format!(
+                    "for loop increment must be integer, got {}",
+                    v.type_name()
+                )))
+            }
+        };
+
+        // The loop is INCLUSIVE of end.
+        let mut cur = start;
+        loop {
+            if step > 0 && cur > end {
+                break;
+            }
+            if step < 0 && cur < end {
+                break;
+            }
+            if step == 0 {
+                break;
+            }
+            self.env.set(&fl.var, Value::Integer(cur))?;
+            self.env.push_scope();
+            let res = self.run_body(fl.body.clone());
+            self.env.pop_scope();
+            res?;
+            cur += step;
+        }
+        Ok(())
+    }
+
+    fn exec_while(&mut self, wl: WhileLoopStmt) -> Result<(), RuntimeError> {
+        loop {
+            let cond = self.eval_expr(wl.condition.clone())?;
+            if !cond.is_truthy() {
+                break;
+            }
+            self.env.push_scope();
+            let res = self.run_body(wl.body.clone());
+            self.env.pop_scope();
+            res?;
+        }
+        Ok(())
+    }
+
+    fn exec_foreach(&mut self, fe: ForEachStmt) -> Result<(), RuntimeError> {
+        let col = self.eval_expr(fe.collection)?;
+        let arr = match col {
+            Value::Json(serde_json::Value::Array(arr)) => arr,
+            _ => {
+                return Err(RuntimeError::TypeError(
+                    "for each requires a json array".to_string(),
+                ))
+            }
+        };
+        for item in arr {
+            self.env.push_scope();
+            // The iteration variable is implicitly declared as json.
+            self.env
+                .define(&fe.var, Value::Json(item), RundellType::Json, false)?;
+            let res = self.run_body(fe.body.clone());
+            self.env.pop_scope();
+            res?;
+        }
+        Ok(())
+    }
+
+    fn exec_try(&mut self, tc: TryCatchStmt) -> Result<(), RuntimeError> {
+        let try_result = {
+            self.env.push_scope();
+            let r = self.run_body(tc.try_body);
+            self.env.pop_scope();
+            r
+        };
+
+        match try_result {
+            Ok(()) => {
+                // Run finally if present, then succeed.
+                if let Some(fb) = tc.finally_body {
+                    self.env.push_scope();
+                    let fr = self.run_body(fb);
+                    self.env.pop_scope();
+                    return fr;
+                }
+                Ok(())
+            }
+            Err(err) => {
+                // Try to match the error to a catch clause.
+                let err_name = runtime_error_name(&err);
+                let matched = tc.catches.iter().find(|c| c.error_type == err_name);
+
+                let catch_result = if let Some(catch_clause) = matched {
+                    let body = catch_clause.body.clone();
+                    self.env.push_scope();
+                    let r = self.run_body(body);
+                    self.env.pop_scope();
+                    Some(r)
+                } else {
+                    None
+                };
+
+                // Always run finally.
+                if let Some(fb) = tc.finally_body {
+                    self.env.push_scope();
+                    let fr = self.run_body(fb);
+                    self.env.pop_scope();
+                    // If finally itself errors, propagate that.
+                    fr?;
+                }
+
+                match catch_result {
+                    Some(r) => r,
+                    None => Err(err), // Re-raise unmatched error.
+                }
+            }
+        }
+    }
+
+    fn exec_remove(&mut self, expr: Expr) -> Result<(), RuntimeError> {
+        // expr must be an Index expression
+        match expr {
+            Expr::Index(col_expr, key_expr) => {
+                let key = self.eval_expr(*key_expr)?;
+                let root_name = Self::find_root_ident(&col_expr)?;
+
+                // Collect the path
+                let mut path = Vec::new();
+                Self::collect_index_path(&col_expr, &mut path);
+
+                let mut root_json = match self.env.get(&root_name)?.clone() {
+                    Value::Json(j) => j,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "remove target is not a json collection".to_string(),
+                        ))
+                    }
+                };
+
+                if path.is_empty() {
+                    // Direct remove from root
+                    Self::json_remove_key(&mut root_json, &key)?;
+                } else {
+                    // Navigate to parent
+                    let parent = Self::json_navigate_mut_simple(&mut root_json, &path)?;
+                    Self::json_remove_key(parent, &key)?;
+                }
+
+                self.env.set(&root_name, Value::Json(root_json))
+            }
+            _ => Err(RuntimeError::TypeError(
+                "remove requires an index expression".to_string(),
+            )),
+        }
+    }
+
+    fn json_navigate_mut_simple<'a>(
+        json: &'a mut serde_json::Value,
+        path: &[Expr],
+    ) -> Result<&'a mut serde_json::Value, RuntimeError> {
+        if path.is_empty() {
+            return Ok(json);
+        }
+        let key = Self::eval_expr_simple(&path[0])?;
+        let next = Self::json_get_mut(json, &key)?;
+        Self::json_navigate_mut_simple(next, &path[1..])
+    }
+
+    fn json_remove_key(json: &mut serde_json::Value, key: &Value) -> Result<(), RuntimeError> {
+        match (json, key) {
+            (serde_json::Value::Object(map), Value::Str(k)) => {
+                map.remove(k.as_str());
+                Ok(())
+            }
+            (serde_json::Value::Array(arr), Value::Integer(i)) => {
+                let idx = *i as usize;
+                if idx < arr.len() {
+                    arr.remove(idx);
+                    Ok(())
+                } else {
+                    Err(RuntimeError::IndexError(format!(
+                        "index {i} out of bounds for remove"
+                    )))
+                }
+            }
+            _ => Err(RuntimeError::TypeError(
+                "incompatible collection/key for remove".to_string(),
+            )),
+        }
+    }
+
+    fn exec_append(&mut self, col_expr: Expr, val_expr: Expr) -> Result<Value, RuntimeError> {
+        let val = self.eval_expr(val_expr)?;
+        let json_val = value_to_json(val)?;
+
+        let root_name = Self::find_root_ident(&col_expr)?;
+        let mut path = Vec::new();
+        Self::collect_index_path(&col_expr, &mut path);
+
+        let mut root_json = match self.env.get(&root_name)?.clone() {
+            Value::Json(j) => j,
+            _ => {
+                return Err(RuntimeError::TypeError(
+                    "append target is not a json collection".to_string(),
+                ))
+            }
+        };
+
+        if path.is_empty() {
+            // Append directly to root
+            match &mut root_json {
+                serde_json::Value::Array(arr) => arr.push(json_val),
+                _ => {
+                    return Err(RuntimeError::TypeError(
+                        "append target is not a json array".to_string(),
+                    ))
+                }
+            }
+        } else {
+            let parent = Self::json_navigate_mut_simple(&mut root_json, &path)?;
+            match parent {
+                serde_json::Value::Array(arr) => arr.push(json_val),
+                _ => {
+                    return Err(RuntimeError::TypeError(
+                        "append target is not a json array".to_string(),
+                    ))
+                }
+            }
+        }
+
+        self.env.set(&root_name, Value::Json(root_json))?;
+        Ok(Value::Null)
+    }
+
+    /// Run a sequence of statements (used for block bodies).
+    fn run_body(&mut self, stmts: Vec<Stmt>) -> Result<(), RuntimeError> {
+        for stmt in stmts {
+            self.exec_stmt(stmt)?;
+        }
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Expression evaluation
+    // -----------------------------------------------------------------------
+
+    /// Evaluate an expression to a value.
+    pub fn eval_expr(&mut self, expr: Expr) -> Result<Value, RuntimeError> {
+        match expr {
+            Expr::Literal(lit) => Ok(literal_to_value(lit)),
+            Expr::Identifier(name) => {
+                let val = self.env.get(&name)?.clone();
+                // Accessing a null variable raises NullError
+                if matches!(val, Value::Null) {
+                    Err(RuntimeError::NullError(name))
+                } else {
+                    Ok(val)
+                }
+            }
+            Expr::BinaryOp(left, op, right) => self.eval_binop(*left, op, *right),
+            Expr::UnaryOp(op, inner) => self.eval_unary(op, *inner),
+            Expr::Index(col, key) => self.eval_index(*col, *key),
+            Expr::Call(name, args) => self.eval_call(name, args),
+            Expr::IsNull(inner) => {
+                // Do NOT raise NullError here — that's the whole point.
+                let val = self.eval_expr_nullable(*inner)?;
+                Ok(Value::Boolean(matches!(val, Value::Null)))
+            }
+            Expr::IsNotNull(inner) => {
+                let val = self.eval_expr_nullable(*inner)?;
+                Ok(Value::Boolean(!matches!(val, Value::Null)))
+            }
+            Expr::JsonLiteral(v) => Ok(Value::Json(v)),
+        }
+    }
+
+    /// Evaluate an expression without raising NullError for null identifiers.
+    fn eval_expr_nullable(&mut self, expr: Expr) -> Result<Value, RuntimeError> {
+        match expr {
+            Expr::Identifier(name) => {
+                // Don't raise NullError — return Null directly
+                match self.env.get(&name) {
+                    Ok(v) => Ok(v.clone()),
+                    Err(_) => Ok(Value::Null),
+                }
+            }
+            other => self.eval_expr(other),
+        }
+    }
+
+    fn eval_binop(&mut self, left: Expr, op: BinOp, right: Expr) -> Result<Value, RuntimeError> {
+        // Short-circuit AND/OR before evaluating right side
+        match op {
+            BinOp::And => {
+                let l = self.eval_expr(left)?;
+                if !l.is_truthy() {
+                    return Ok(Value::Boolean(false));
+                }
+                let r = self.eval_expr(right)?;
+                return Ok(Value::Boolean(r.is_truthy()));
+            }
+            BinOp::Or => {
+                let l = self.eval_expr(left)?;
+                if l.is_truthy() {
+                    return Ok(Value::Boolean(true));
+                }
+                let r = self.eval_expr(right)?;
+                return Ok(Value::Boolean(r.is_truthy()));
+            }
+            _ => {}
+        }
+
+        let l = self.eval_expr(left)?;
+        let r = self.eval_expr(right)?;
+
+        match op {
+            BinOp::Add => eval_add(l, r),
+            BinOp::Sub => eval_arith(l, r, ArithOp::Sub),
+            BinOp::Mul => eval_arith(l, r, ArithOp::Mul),
+            BinOp::Div => eval_div(l, r),
+            BinOp::Mod => eval_mod(l, r),
+            BinOp::Pow => eval_pow(l, r),
+            BinOp::Eq => Ok(Value::Boolean(values_equal(&l, &r))),
+            BinOp::NotEq => Ok(Value::Boolean(!values_equal(&l, &r))),
+            BinOp::Lt => compare_values(&l, &CmpOp::Lt, &r).map(Value::Boolean),
+            BinOp::LtEq => compare_values(&l, &CmpOp::LtEq, &r).map(Value::Boolean),
+            BinOp::Gt => compare_values(&l, &CmpOp::Gt, &r).map(Value::Boolean),
+            BinOp::GtEq => compare_values(&l, &CmpOp::GtEq, &r).map(Value::Boolean),
+            BinOp::StrConcat => match (l, r) {
+                (Value::Str(a), Value::Str(b)) => Ok(Value::Str(a + &b)),
+                _ => Err(RuntimeError::TypeError(
+                    "StrConcat requires string operands".to_string(),
+                )),
+            },
+            BinOp::And | BinOp::Or => unreachable!("handled above"),
+        }
+    }
+
+    fn eval_unary(&mut self, op: UnaryOp, inner: Expr) -> Result<Value, RuntimeError> {
+        let val = self.eval_expr(inner)?;
+        match op {
+            UnaryOp::Neg => match val {
+                Value::Integer(n) => Ok(Value::Integer(-n)),
+                Value::Float(f) => Ok(Value::Float(-f)),
+                Value::Currency(c) => Ok(Value::Currency(-c)),
+                _ => Err(RuntimeError::TypeError(format!(
+                    "unary negation not valid on {}",
+                    val.type_name()
+                ))),
+            },
+            UnaryOp::Not => Ok(Value::Boolean(!val.is_truthy())),
+        }
+    }
+
+    fn eval_index(&mut self, col_expr: Expr, key_expr: Expr) -> Result<Value, RuntimeError> {
+        let col = self.eval_expr(col_expr)?;
+        let key = self.eval_expr(key_expr)?;
+        match col {
+            Value::Json(j) => json_index(j, key),
+            _ => Err(RuntimeError::TypeError(format!(
+                "index access requires json, got {}",
+                col.type_name()
+            ))),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Function / built-in calls
+    // -----------------------------------------------------------------------
+
+    fn eval_call(&mut self, name: String, args: Vec<Expr>) -> Result<Value, RuntimeError> {
+        // Built-ins take priority over user functions.
+        if is_builtin(&name) {
+            return self.eval_builtin(&name, args);
+        }
+        self.eval_user_function(&name, args)
+    }
+
+    fn eval_builtin(&mut self, name: &str, args: Vec<Expr>) -> Result<Value, RuntimeError> {
+        match name {
+            "newline" => Ok(Value::Str("\n".to_string())),
+
+            "length" => {
+                let v = self.eval_args(args, 1)?;
+                match &v[0] {
+                    Value::Str(s) => Ok(Value::Integer(s.chars().count() as i64)),
+                    Value::Json(serde_json::Value::Array(arr)) => {
+                        Ok(Value::Integer(arr.len() as i64))
+                    }
+                    Value::Json(serde_json::Value::Object(map)) => {
+                        Ok(Value::Integer(map.len() as i64))
+                    }
+                    _ => Err(RuntimeError::TypeError(
+                        "length() requires string or json".to_string(),
+                    )),
+                }
+            }
+
+            "cast" => {
+                let mut evaled = Vec::with_capacity(2);
+                for a in args {
+                    evaled.push(self.eval_expr(a)?);
+                }
+                if evaled.len() != 2 {
+                    return Err(RuntimeError::RuntimeError(
+                        "cast() requires 2 arguments".to_string(),
+                    ));
+                }
+                let target_type = match &evaled[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "cast() second argument must be a type name".to_string(),
+                        ))
+                    }
+                };
+                cast_value(evaled.remove(0), &target_type)
+            }
+
+            "abs" => {
+                let v = self.eval_args(args, 1)?;
+                match v[0].clone() {
+                    Value::Integer(n) => Ok(Value::Integer(n.abs())),
+                    Value::Float(f) => Ok(Value::Float(f.abs())),
+                    Value::Currency(c) => Ok(Value::Currency(c.abs())),
+                    _ => Err(RuntimeError::TypeError(
+                        "abs() requires numeric argument".to_string(),
+                    )),
+                }
+            }
+
+            "floor" => {
+                let v = self.eval_args(args, 1)?;
+                match v[0].clone() {
+                    Value::Float(f) => Ok(Value::Integer(f.floor() as i64)),
+                    Value::Integer(n) => Ok(Value::Integer(n)),
+                    _ => Err(RuntimeError::TypeError(
+                        "floor() requires numeric argument".to_string(),
+                    )),
+                }
+            }
+
+            "ceil" => {
+                let v = self.eval_args(args, 1)?;
+                match v[0].clone() {
+                    Value::Float(f) => Ok(Value::Integer(f.ceil() as i64)),
+                    Value::Integer(n) => Ok(Value::Integer(n)),
+                    _ => Err(RuntimeError::TypeError(
+                        "ceil() requires numeric argument".to_string(),
+                    )),
+                }
+            }
+
+            "round" => {
+                let v = self.eval_args(args, 2)?;
+                let f = match v[0].clone() {
+                    Value::Float(f) => f,
+                    Value::Integer(n) => n as f64,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "round() first argument must be numeric".to_string(),
+                        ))
+                    }
+                };
+                let dp = match v[1].clone() {
+                    Value::Integer(n) => n,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "round() second argument must be integer".to_string(),
+                        ))
+                    }
+                };
+                let factor = 10_f64.powi(dp as i32);
+                Ok(Value::Float((f * factor).round() / factor))
+            }
+
+            "substr" => {
+                let v = self.eval_args(args, 3)?;
+                let s = match v[0].clone() {
+                    Value::Str(s) => s,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "substr() first argument must be string".to_string(),
+                        ))
+                    }
+                };
+                let start = match v[1].clone() {
+                    Value::Integer(n) => n as usize,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "substr() start must be integer".to_string(),
+                        ))
+                    }
+                };
+                let len = match v[2].clone() {
+                    Value::Integer(n) => n as usize,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "substr() length must be integer".to_string(),
+                        ))
+                    }
+                };
+                let chars: Vec<char> = s.chars().collect();
+                let end = (start + len).min(chars.len());
+                let result: String = chars[start.min(chars.len())..end].iter().collect();
+                Ok(Value::Str(result))
+            }
+
+            "upper" => {
+                let v = self.eval_args(args, 1)?;
+                match v[0].clone() {
+                    Value::Str(s) => Ok(Value::Str(s.to_uppercase())),
+                    _ => Err(RuntimeError::TypeError(
+                        "upper() requires string".to_string(),
+                    )),
+                }
+            }
+
+            "lower" => {
+                let v = self.eval_args(args, 1)?;
+                match v[0].clone() {
+                    Value::Str(s) => Ok(Value::Str(s.to_lowercase())),
+                    _ => Err(RuntimeError::TypeError(
+                        "lower() requires string".to_string(),
+                    )),
+                }
+            }
+
+            "trim" => {
+                let v = self.eval_args(args, 1)?;
+                match v[0].clone() {
+                    Value::Str(s) => Ok(Value::Str(s.trim().to_string())),
+                    _ => Err(RuntimeError::TypeError(
+                        "trim() requires string".to_string(),
+                    )),
+                }
+            }
+
+            "string" => {
+                let v = self.eval_args(args, 1)?;
+                Ok(Value::Str(v[0].to_display_string()))
+            }
+
+            "append" => {
+                if args.len() != 2 {
+                    return Err(RuntimeError::RuntimeError(
+                        "append() requires 2 arguments".to_string(),
+                    ));
+                }
+                let mut args = args;
+                let col_expr = args.remove(0);
+                let val_expr = args.remove(0);
+                self.exec_append(col_expr, val_expr)
+            }
+
+            other => Err(RuntimeError::RuntimeError(format!(
+                "unknown built-in: {other}"
+            ))),
+        }
+    }
+
+    /// Evaluate exactly `expected` arguments.
+    fn eval_args(&mut self, args: Vec<Expr>, expected: usize) -> Result<Vec<Value>, RuntimeError> {
+        if args.len() != expected {
+            return Err(RuntimeError::RuntimeError(format!(
+                "expected {expected} arguments, got {}",
+                args.len()
+            )));
+        }
+        let mut vals = Vec::with_capacity(expected);
+        for a in args {
+            vals.push(self.eval_expr(a)?);
+        }
+        Ok(vals)
+    }
+
+    fn eval_user_function(&mut self, name: &str, args: Vec<Expr>) -> Result<Value, RuntimeError> {
+        let func =
+            self.functions.get(name).cloned().ok_or_else(|| {
+                RuntimeError::RuntimeError(format!("undefined function '{name}'"))
+            })?;
+
+        if args.len() != func.params.len() {
+            return Err(RuntimeError::RuntimeError(format!(
+                "function '{name}' expects {} arguments, got {}",
+                func.params.len(),
+                args.len()
+            )));
+        }
+
+        // Evaluate arguments in the current scope.
+        let mut arg_vals = Vec::with_capacity(args.len());
+        for a in args {
+            arg_vals.push(self.eval_expr(a)?);
+        }
+
+        // Push a new scope for the function body.
+        self.env.push_scope();
+        for (param, val) in func.params.iter().zip(arg_vals) {
+            let coerced = coerce_to_declared_type(val, &param.typ);
+            self.env.define(&param.name, coerced, param.typ.clone(), true)?;
+        }
+
+        let result = self.run_body(func.body.clone());
+
+        self.env.pop_scope();
+
+        match result {
+            Ok(()) => Ok(Value::Null), // void function
+            Err(RuntimeError::ReturnValue(val)) => Ok(val.unwrap_or(Value::Null)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper functions (free)
+// ---------------------------------------------------------------------------
+
+/// Convert an AST `Literal` to a runtime `Value`.
+fn literal_to_value(lit: Literal) -> Value {
+    match lit {
+        Literal::Integer(n) => Value::Integer(n),
+        Literal::Float(f) => Value::Float(f),
+        Literal::Str(s) => Value::Str(s),
+        Literal::Currency(c) => Value::Currency(c),
+        Literal::Boolean(b) => Value::Boolean(b),
+        Literal::Null => Value::Null,
+    }
+}
+
+/// Convert a runtime `Value` into a `serde_json::Value` for JSON storage.
+fn value_to_json(val: Value) -> Result<serde_json::Value, RuntimeError> {
+    match val {
+        Value::Integer(n) => Ok(serde_json::Value::Number(n.into())),
+        Value::Float(f) => serde_json::Number::from_f64(f)
+            .map(serde_json::Value::Number)
+            .ok_or_else(|| RuntimeError::TypeError("float cannot be stored in JSON".to_string())),
+        Value::Str(s) => Ok(serde_json::Value::String(s)),
+        Value::Boolean(b) => Ok(serde_json::Value::Bool(b)),
+        Value::Json(j) => Ok(j),
+        Value::Null => Ok(serde_json::Value::Null),
+        Value::Currency(c) => {
+            let f = c as f64 / 100.0;
+            serde_json::Number::from_f64(f)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| {
+                    RuntimeError::TypeError("currency cannot be stored in JSON".to_string())
+                })
+        }
+    }
+}
+
+/// Convert a `serde_json::Value` into a runtime `Value`.
+fn json_to_value(j: serde_json::Value) -> Value {
+    match j {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Boolean(b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Integer(i)
+            } else {
+                Value::Float(n.as_f64().unwrap_or(0.0))
+            }
+        }
+        serde_json::Value::String(s) => Value::Str(s),
+        other => Value::Json(other),
+    }
+}
+
+/// Index into a JSON value.
+fn json_index(j: serde_json::Value, key: Value) -> Result<Value, RuntimeError> {
+    match (j, key) {
+        (serde_json::Value::Object(map), Value::Str(k)) => map
+            .get(&k)
+            .cloned()
+            .map(json_to_value)
+            .ok_or_else(|| RuntimeError::IndexError(format!("key '{k}' not found"))),
+        (serde_json::Value::Object(map), Value::Integer(i)) => {
+            // Positional access by key insertion order.
+            map.values()
+                .nth(i as usize)
+                .cloned()
+                .map(json_to_value)
+                .ok_or_else(|| {
+                    RuntimeError::IndexError(format!("positional index {i} out of bounds"))
+                })
+        }
+        (serde_json::Value::Array(arr), Value::Integer(i)) => arr
+            .into_iter()
+            .nth(i as usize)
+            .map(json_to_value)
+            .ok_or_else(|| RuntimeError::IndexError(format!("index {i} out of bounds"))),
+        (col, key) => Err(RuntimeError::TypeError(format!(
+            "cannot index {} with {}",
+            col,
+            key.type_name()
+        ))),
+    }
+}
+
+/// True if two values are equal (across compatible types).
+fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Integer(x), Value::Integer(y)) => x == y,
+        (Value::Float(x), Value::Float(y)) => x == y,
+        (Value::Integer(x), Value::Float(y)) => (*x as f64) == *y,
+        (Value::Float(x), Value::Integer(y)) => *x == (*y as f64),
+        (Value::Str(x), Value::Str(y)) => x == y,
+        (Value::Boolean(x), Value::Boolean(y)) => x == y,
+        (Value::Currency(x), Value::Currency(y)) => x == y,
+        (Value::Null, Value::Null) => true,
+        _ => false,
+    }
+}
+
+/// Compare two values with the given comparison operator.
+fn compare_values(a: &Value, op: &CmpOp, b: &Value) -> Result<bool, RuntimeError> {
+    match (a, b) {
+        (Value::Integer(x), Value::Integer(y)) => Ok(apply_cmp(*x, op, *y)),
+        (Value::Float(x), Value::Float(y)) => Ok(apply_cmp_f(*x, op, *y)),
+        (Value::Integer(x), Value::Float(y)) => Ok(apply_cmp_f(*x as f64, op, *y)),
+        (Value::Float(x), Value::Integer(y)) => Ok(apply_cmp_f(*x, op, *y as f64)),
+        (Value::Str(x), Value::Str(y)) => Ok(apply_cmp_ord(x.as_str(), op, y.as_str())),
+        (Value::Currency(x), Value::Currency(y)) => Ok(apply_cmp(*x, op, *y)),
+        _ => Err(RuntimeError::TypeError(format!(
+            "cannot compare {} with {}",
+            a.type_name(),
+            b.type_name()
+        ))),
+    }
+}
+
+fn apply_cmp<T: PartialOrd>(a: T, op: &CmpOp, b: T) -> bool {
+    match op {
+        CmpOp::Lt => a < b,
+        CmpOp::LtEq => a <= b,
+        CmpOp::Gt => a > b,
+        CmpOp::GtEq => a >= b,
+        CmpOp::Eq => a == b,
+        CmpOp::NotEq => a != b,
+    }
+}
+
+fn apply_cmp_f(a: f64, op: &CmpOp, b: f64) -> bool {
+    apply_cmp(a, op, b)
+}
+
+fn apply_cmp_ord(a: &str, op: &CmpOp, b: &str) -> bool {
+    apply_cmp(a, op, b)
+}
+
+enum ArithOp {
+    Sub,
+    Mul,
+}
+
+/// Evaluate an arithmetic (non-add, non-div) binary operation.
+fn eval_arith(l: Value, r: Value, op: ArithOp) -> Result<Value, RuntimeError> {
+    // Null check
+    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+        return Err(RuntimeError::NullError(
+            "arithmetic on null value".to_string(),
+        ));
+    }
+    match (l, r) {
+        (Value::Integer(a), Value::Integer(b)) => match op {
+            ArithOp::Sub => Ok(Value::Integer(a - b)),
+            ArithOp::Mul => Ok(Value::Integer(a * b)),
+        },
+        (Value::Float(a), Value::Float(b)) => match op {
+            ArithOp::Sub => Ok(Value::Float(a - b)),
+            ArithOp::Mul => Ok(Value::Float(a * b)),
+        },
+        (Value::Integer(a), Value::Float(b)) | (Value::Float(b), Value::Integer(a))
+            if matches!(op, ArithOp::Sub) =>
+        {
+            Ok(Value::Float(a as f64 - b))
+        }
+        (Value::Integer(a), Value::Float(b)) => Ok(Value::Float(a as f64 * b)),
+        (Value::Float(a), Value::Integer(b)) => Ok(Value::Float(a * b as f64)),
+        (Value::Currency(a), Value::Currency(b)) => match op {
+            ArithOp::Sub => Ok(Value::Currency(a - b)),
+            ArithOp::Mul => Ok(Value::Currency(a * b / 100)),
+        },
+        // Currency mixed with Float or Integer: promote to float.
+        (Value::Currency(c), Value::Float(f)) | (Value::Float(f), Value::Currency(c)) => {
+            let cf = currency_as_float(c);
+            match op {
+                ArithOp::Sub => Ok(Value::Float(cf - f)),
+                ArithOp::Mul => Ok(Value::Float(cf * f)),
+            }
+        }
+        (Value::Currency(c), Value::Integer(n)) | (Value::Integer(n), Value::Currency(c)) => {
+            let cf = currency_as_float(c);
+            match op {
+                ArithOp::Sub => Ok(Value::Float(cf - n as f64)),
+                ArithOp::Mul => Ok(Value::Float(cf * n as f64)),
+            }
+        }
+        (a, b) => Err(RuntimeError::TypeError(format!(
+            "arithmetic type mismatch: {} and {}",
+            a.type_name(),
+            b.type_name()
+        ))),
+    }
+}
+
+/// Evaluate addition (may be string concatenation).
+fn eval_add(l: Value, r: Value) -> Result<Value, RuntimeError> {
+    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+        return Err(RuntimeError::NullError(
+            "arithmetic on null value".to_string(),
+        ));
+    }
+    match (l, r) {
+        (Value::Str(a), Value::Str(b)) => Ok(Value::Str(a + &b)),
+        (Value::Str(_), other) => Err(RuntimeError::TypeError(format!(
+            "string concatenation requires string operand, got {}",
+            other.type_name()
+        ))),
+        (other, Value::Str(_)) => Err(RuntimeError::TypeError(format!(
+            "string concatenation requires string operand, got {}",
+            other.type_name()
+        ))),
+        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
+        (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
+        (Value::Integer(a), Value::Float(b)) => Ok(Value::Float(a as f64 + b)),
+        (Value::Float(a), Value::Integer(b)) => Ok(Value::Float(a + b as f64)),
+        (Value::Currency(a), Value::Currency(b)) => Ok(Value::Currency(a + b)),
+        // Currency mixed with Float or Integer: promote to float.
+        (Value::Currency(c), Value::Float(f)) | (Value::Float(f), Value::Currency(c)) => {
+            Ok(Value::Float(currency_as_float(c) + f))
+        }
+        (Value::Currency(c), Value::Integer(n)) | (Value::Integer(n), Value::Currency(c)) => {
+            Ok(Value::Float(currency_as_float(c) + n as f64))
+        }
+        (a, b) => Err(RuntimeError::TypeError(format!(
+            "add type mismatch: {} and {}",
+            a.type_name(),
+            b.type_name()
+        ))),
+    }
+}
+
+fn eval_div(l: Value, r: Value) -> Result<Value, RuntimeError> {
+    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+        return Err(RuntimeError::NullError(
+            "arithmetic on null value".to_string(),
+        ));
+    }
+    match (l, r) {
+        (Value::Integer(a), Value::Integer(b)) => {
+            if b == 0 {
+                Err(RuntimeError::DivisionError)
+            } else {
+                // Truncate toward zero
+                Ok(Value::Integer(a / b))
+            }
+        }
+        (Value::Float(a), Value::Float(b)) => {
+            if b == 0.0 {
+                Err(RuntimeError::DivisionError)
+            } else {
+                Ok(Value::Float(a / b))
+            }
+        }
+        (Value::Integer(a), Value::Float(b)) => {
+            if b == 0.0 {
+                Err(RuntimeError::DivisionError)
+            } else {
+                Ok(Value::Float(a as f64 / b))
+            }
+        }
+        (Value::Float(a), Value::Integer(b)) => {
+            if b == 0 {
+                Err(RuntimeError::DivisionError)
+            } else {
+                Ok(Value::Float(a / b as f64))
+            }
+        }
+        // Currency mixed with Float or Integer: promote to float.
+        (Value::Currency(c), Value::Float(f)) => {
+            if f == 0.0 {
+                Err(RuntimeError::DivisionError)
+            } else {
+                Ok(Value::Float(currency_as_float(c) / f))
+            }
+        }
+        (Value::Float(f), Value::Currency(c)) => {
+            if c == 0 {
+                Err(RuntimeError::DivisionError)
+            } else {
+                Ok(Value::Float(f / currency_as_float(c)))
+            }
+        }
+        (Value::Currency(c), Value::Integer(n)) => {
+            if n == 0 {
+                Err(RuntimeError::DivisionError)
+            } else {
+                Ok(Value::Float(currency_as_float(c) / n as f64))
+            }
+        }
+        (Value::Integer(n), Value::Currency(c)) => {
+            if c == 0 {
+                Err(RuntimeError::DivisionError)
+            } else {
+                Ok(Value::Float(n as f64 / currency_as_float(c)))
+            }
+        }
+        (a, b) => Err(RuntimeError::TypeError(format!(
+            "division type mismatch: {} and {}",
+            a.type_name(),
+            b.type_name()
+        ))),
+    }
+}
+
+fn eval_mod(l: Value, r: Value) -> Result<Value, RuntimeError> {
+    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+        return Err(RuntimeError::NullError(
+            "arithmetic on null value".to_string(),
+        ));
+    }
+    match (l, r) {
+        (Value::Integer(a), Value::Integer(b)) => {
+            if b == 0 {
+                Err(RuntimeError::DivisionError)
+            } else {
+                Ok(Value::Integer(a % b))
+            }
+        }
+        (a, b) => Err(RuntimeError::TypeError(format!(
+            "modulo requires integer operands, got {} and {}",
+            a.type_name(),
+            b.type_name()
+        ))),
+    }
+}
+
+fn eval_pow(l: Value, r: Value) -> Result<Value, RuntimeError> {
+    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+        return Err(RuntimeError::NullError(
+            "arithmetic on null value".to_string(),
+        ));
+    }
+    match (l, r) {
+        (Value::Integer(a), Value::Integer(b)) => {
+            if b < 0 {
+                Ok(Value::Float((a as f64).powi(b as i32)))
+            } else {
+                Ok(Value::Integer(a.pow(b as u32)))
+            }
+        }
+        (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a.powf(b))),
+        (Value::Integer(a), Value::Float(b)) => Ok(Value::Float((a as f64).powf(b))),
+        (Value::Float(a), Value::Integer(b)) => Ok(Value::Float(a.powi(b as i32))),
+        // Currency mixed with Float or Integer: promote to float.
+        (Value::Currency(c), Value::Float(f)) => Ok(Value::Float(currency_as_float(c).powf(f))),
+        (Value::Float(f), Value::Currency(c)) => Ok(Value::Float(f.powf(currency_as_float(c)))),
+        (Value::Currency(c), Value::Integer(n)) => {
+            Ok(Value::Float(currency_as_float(c).powi(n as i32)))
+        }
+        (Value::Integer(n), Value::Currency(c)) => {
+            Ok(Value::Float((n as f64).powf(currency_as_float(c))))
+        }
+        (a, b) => Err(RuntimeError::TypeError(format!(
+            "exponentiation type mismatch: {} and {}",
+            a.type_name(),
+            b.type_name()
+        ))),
+    }
+}
+
+/// Convert currency cents to its float equivalent.
+///
+/// Used for Currency→Float promotion in mixed-type arithmetic.
+#[inline]
+fn currency_as_float(cents: i64) -> f64 {
+    cents as f64 / 100.0
+}
+
+/// Coerce an initial value to match the variable's declared type.
+///
+/// This resolves the lexer ambiguity where a two-decimal-place literal
+/// (e.g. `3.14`) is tokenised as `CurrencyLit` regardless of the declared
+/// type.  Only numeric types are silently promoted; all other mismatches
+/// are left untouched (the runtime will raise a TypeError if they are
+/// used incorrectly).
+fn coerce_to_declared_type(val: Value, typ: &RundellType) -> Value {
+    match (val, typ) {
+        // Currency literal used where float is declared → convert to float.
+        (Value::Currency(c), RundellType::Float) => Value::Float(currency_as_float(c)),
+        // Integer used where float is declared → widen.
+        (Value::Integer(n), RundellType::Float) => Value::Float(n as f64),
+        // Currency literal used where integer is declared → truncate.
+        (Value::Currency(c), RundellType::Integer) => Value::Integer(c / 100),
+        // Integer/float/currency used where currency is declared → convert.
+        (Value::Integer(n), RundellType::Currency) => Value::Currency(n * 100),
+        (Value::Float(f), RundellType::Currency) => Value::Currency((f * 100.0).round() as i64),
+        // All other combinations are returned unchanged.
+        (v, _) => v,
+    }
+}
+
+/// Cast a value to a target type identified by name.
+fn cast_value(val: Value, target: &str) -> Result<Value, RuntimeError> {
+    match target {
+        "string" => Ok(Value::Str(val.to_display_string())),
+        "integer" => match val {
+            Value::Integer(n) => Ok(Value::Integer(n)),
+            Value::Float(f) => Ok(Value::Integer(f.trunc() as i64)),
+            Value::Boolean(b) => Ok(Value::Integer(if b { 1 } else { 0 })),
+            Value::Currency(c) => Ok(Value::Integer(c / 100)),
+            Value::Str(s) => s.parse::<i64>().map(Value::Integer).map_err(|_| {
+                RuntimeError::TypeError(format!("cannot cast string '{s}' to integer"))
+            }),
+            Value::Null => Err(RuntimeError::NullError("cast null to integer".to_string())),
+            Value::Json(_) => Err(RuntimeError::TypeError(
+                "cannot cast json to integer".to_string(),
+            )),
+        },
+        "float" => match val {
+            Value::Float(f) => Ok(Value::Float(f)),
+            Value::Integer(n) => Ok(Value::Float(n as f64)),
+            Value::Currency(c) => Ok(Value::Float(c as f64 / 100.0)),
+            Value::Str(s) => s
+                .parse::<f64>()
+                .map(Value::Float)
+                .map_err(|_| RuntimeError::TypeError(format!("cannot cast string '{s}' to float"))),
+            Value::Null => Err(RuntimeError::NullError("cast null to float".to_string())),
+            v => Err(RuntimeError::TypeError(format!(
+                "cannot cast {} to float",
+                v.type_name()
+            ))),
+        },
+        "boolean" => match val {
+            Value::Boolean(b) => Ok(Value::Boolean(b)),
+            Value::Integer(n) => Ok(Value::Boolean(n != 0)),
+            Value::Str(s) => match s.to_lowercase().as_str() {
+                "true" | "yes" => Ok(Value::Boolean(true)),
+                "false" | "no" => Ok(Value::Boolean(false)),
+                _ => Err(RuntimeError::TypeError(format!(
+                    "cannot cast string '{s}' to boolean"
+                ))),
+            },
+            Value::Null => Err(RuntimeError::NullError("cast null to boolean".to_string())),
+            v => Err(RuntimeError::TypeError(format!(
+                "cannot cast {} to boolean",
+                v.type_name()
+            ))),
+        },
+        "currency" => match val {
+            Value::Currency(c) => Ok(Value::Currency(c)),
+            Value::Integer(n) => Ok(Value::Currency(n * 100)),
+            Value::Float(f) => Ok(Value::Currency((f * 100.0).round() as i64)),
+            Value::Str(s) => {
+                // Parse as float first
+                s.parse::<f64>()
+                    .map(|f| Value::Currency((f * 100.0).round() as i64))
+                    .map_err(|_| {
+                        RuntimeError::TypeError(format!("cannot cast string '{s}' to currency"))
+                    })
+            }
+            Value::Null => Err(RuntimeError::NullError("cast null to currency".to_string())),
+            v => Err(RuntimeError::TypeError(format!(
+                "cannot cast {} to currency",
+                v.type_name()
+            ))),
+        },
+        "json" => match val {
+            Value::Json(j) => Ok(Value::Json(j)),
+            v => Err(RuntimeError::TypeError(format!(
+                "cannot cast {} to json",
+                v.type_name()
+            ))),
+        },
+        t => Err(RuntimeError::TypeError(format!("unknown cast target: {t}"))),
+    }
+}
+
+/// Coerce a string (from stdin) to the declared variable type.
+fn coerce_string_to_type(s: &str, typ: &RundellType) -> Result<Value, RuntimeError> {
+    match typ {
+        RundellType::Str => Ok(Value::Str(s.to_string())),
+        RundellType::Integer => s
+            .parse::<i64>()
+            .map(Value::Integer)
+            .map_err(|_| RuntimeError::TypeError(format!("cannot coerce '{s}' to integer"))),
+        RundellType::Float => s
+            .parse::<f64>()
+            .map(Value::Float)
+            .map_err(|_| RuntimeError::TypeError(format!("cannot coerce '{s}' to float"))),
+        RundellType::Boolean => match s.to_lowercase().as_str() {
+            "true" | "yes" => Ok(Value::Boolean(true)),
+            "false" | "no" => Ok(Value::Boolean(false)),
+            _ => Err(RuntimeError::TypeError(format!(
+                "cannot coerce '{s}' to boolean"
+            ))),
+        },
+        RundellType::Currency => s
+            .parse::<f64>()
+            .map(|f| Value::Currency((f * 100.0).round() as i64))
+            .map_err(|_| RuntimeError::TypeError(format!("cannot coerce '{s}' to currency"))),
+        RundellType::Json => serde_json::from_str(s)
+            .map(Value::Json)
+            .map_err(|_| RuntimeError::TypeError(format!("cannot coerce '{s}' to json"))),
+    }
+}
+
+/// Return the string name of the error variant (for try/catch matching).
+fn runtime_error_name(err: &RuntimeError) -> String {
+    match err {
+        RuntimeError::TypeError(_) => "TypeError".to_string(),
+        RuntimeError::NullError(_) => "NullError".to_string(),
+        RuntimeError::IndexError(_) => "IndexError".to_string(),
+        RuntimeError::DivisionError => "DivisionError".to_string(),
+        RuntimeError::IOError(_) => "IOError".to_string(),
+        RuntimeError::RuntimeError(_) => "RuntimeError".to_string(),
+        RuntimeError::ReturnValue(_) => "ReturnValue".to_string(),
+    }
+}
+
+/// Returns true if `name` is a built-in function.
+fn is_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "newline"
+            | "length"
+            | "cast"
+            | "abs"
+            | "floor"
+            | "ceil"
+            | "round"
+            | "substr"
+            | "upper"
+            | "lower"
+            | "trim"
+            | "string"
+            | "append"
+    )
+}

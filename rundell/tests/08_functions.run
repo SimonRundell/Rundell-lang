@@ -1,0 +1,15 @@
+define multiply(a as integer, b as integer) returns integer -->
+    return a * b.
+<--
+
+define greet(name as string) returns null -->
+    print "Hello, " + name + "!" + newline().
+    return null.
+<--
+
+print string(multiply(6, 7)) + newline().
+greet("World").
+
+# Expected output:
+# 42
+# Hello, World!

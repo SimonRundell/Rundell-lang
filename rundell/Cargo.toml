@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rundell-lexer",
+    "crates/rundell-parser",
+    "crates/rundell-interpreter",
+    "crates/rundell-cli",
+]

@@ -1,0 +1,35 @@
+# fibonacci.run
+# Print the first 15 Fibonacci numbers using a recursive function.
+
+define fibonacci(n as integer) returns integer -->
+    if (n <= 0) -->
+        return 0.
+    <--
+    if (n == 1) -->
+        return 1.
+    <--
+    return fibonacci(n - 1) + fibonacci(n - 2).
+<--
+
+define i as integer.
+
+for i loops (0, 14, 1) -->
+    print string(fibonacci(i)) + newline().
+<--
+
+# Expected output:
+# 0
+# 1
+# 1
+# 2
+# 3
+# 5
+# 8
+# 13
+# 21
+# 34
+# 55
+# 89
+# 144
+# 233
+# 377

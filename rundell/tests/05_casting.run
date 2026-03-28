@@ -1,0 +1,13 @@
+define i as integer = 42.
+define f as float = cast(i, float).
+define s as string = cast(i, string).
+define b as boolean = cast(0, boolean).
+
+print string(f) + newline().
+print s + newline().
+print string(b) + newline().
+
+# Expected output:
+# 42.0
+# 42
+# false

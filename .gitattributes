@@ -1,0 +1,14 @@
+# Normalise line endings: checkout as-is on Windows, LF in the repo.
+* text=auto
+
+# Rust source and Rundell source — always LF in repo.
+*.rs    text eol=lf
+*.run   text eol=lf
+*.toml  text eol=lf
+*.md    text eol=lf
+*.lock  text eol=lf
+
+# Binary assets — never touch line endings.
+*.png   binary
+*.docx  binary
+*.exe   binary

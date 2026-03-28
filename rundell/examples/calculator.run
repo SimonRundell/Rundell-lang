@@ -1,0 +1,23 @@
+# calculator.run
+# A simple integer calculator that reads two numbers and an
+# operator from the user, then prints the result.
+
+define a as integer.
+define b as integer.
+define op as string.
+
+receive a  with prompt "First number:  ".
+receive op with prompt "Operator (+, -, *, /): ".
+receive b  with prompt "Second number: ".
+
+try -->
+    switch op -->
+        "+" : print string(a + b) + newline().
+        "-" : print string(a - b) + newline().
+        "*" : print string(a * b) + newline().
+        "/" : print string(a / b) + newline().
+        else : print "Unknown operator: " + op + newline().
+    <--
+catch (DivisionError) -->
+    print "Error: division by zero." + newline().
+<--

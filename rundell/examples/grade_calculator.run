@@ -1,0 +1,28 @@
+# grade_calculator.run
+# Average a list of five exam scores and assign a letter grade.
+
+define score1 as integer = 82.
+define score2 as integer = 91.
+define score3 as integer = 67.
+define score4 as integer = 78.
+define score5 as integer = 88.
+
+define total   as integer = score1 + score2 + score3 + score4 + score5.
+define average as float   = cast(total, float) / 5.0.
+
+print "Scores:  " + string(score1) + ", " + string(score2) + ", "
+    + string(score3) + ", " + string(score4) + ", " + string(score5) + newline().
+print "Average: " + string(round(average, 1)) + newline().
+
+switch average -->
+    >= 90 : print "Grade: A" + newline().
+    >= 80 : print "Grade: B" + newline().
+    >= 70 : print "Grade: C" + newline().
+    >= 60 : print "Grade: D" + newline().
+    else  : print "Grade: F" + newline().
+<--
+
+# Expected output (with the scores above):
+# Scores:  82, 91, 67, 78, 88
+# Average: 81.2
+# Grade: B

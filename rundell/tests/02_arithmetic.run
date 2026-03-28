@@ -1,0 +1,19 @@
+define a as integer = 10.
+define b as integer = 3.
+
+print string(a + b) + newline().
+print string(a - b) + newline().
+print string(a * b) + newline().
+print string(a / b) + newline().
+print string(a % b) + newline().
+print string(2 ** 8) + newline().
+print string(cast(a, float) / cast(b, float)) + newline().
+
+# Expected output:
+# 13
+# 7
+# 30
+# 3
+# 1
+# 256
+# 3.3333333333333335

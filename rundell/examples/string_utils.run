@@ -1,0 +1,39 @@
+# string_utils.run
+# Demonstrates all of Rundell's built-in string functions.
+
+define s as string = "  Hello, Rundell!  ".
+
+print "Original:  '" + s + "'" + newline().
+print "Trimmed:   '" + trim(s) + "'" + newline().
+print "Upper:     '" + upper(trim(s)) + "'" + newline().
+print "Lower:     '" + lower(trim(s)) + "'" + newline().
+print "Length:    "  + string(length(trim(s))) + newline().
+print "Substr:    '"  + substr(trim(s), 7, 7) + "'" + newline().
+
+print newline().
+
+# Building a simple title-case function using substr and upper/lower.
+define titleCase(word as string) returns string -->
+    if (length(word) == 0) -->
+        return "".
+    <--
+    define first as string = upper(substr(word, 0, 1)).
+    define rest  as string = lower(substr(word, 1, length(word) - 1)).
+    return first + rest.
+<--
+
+print titleCase("rUNDELL") + newline().   # Rundell
+print titleCase("hELLO")   + newline().   # Hello
+print titleCase("wORLD")   + newline().   # World
+
+# Expected output:
+# Original:  '  Hello, Rundell!  '
+# Trimmed:   'Hello, Rundell!'
+# Upper:     'HELLO, RUNDELL!'
+# Lower:     'hello, rundell!'
+# Length:    15
+# Substr:    'Rundell'
+#
+# Rundell
+# Hello
+# World

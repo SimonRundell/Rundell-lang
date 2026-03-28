@@ -1,0 +1,8 @@
+import "helper".
+
+sayHello("Rundell").
+print GREETING + newline().
+
+# Expected output:
+# Hello from helper, Rundell!
+# Hello from helper
