@@ -1,0 +1,60 @@
+# rest_authenticated_api.run
+# Template for calling a private REST API with bearer-token authentication.
+#
+# Before running, store your credentials:
+#   rundell --env-set MY_API_TOKEN  <your-token>
+#   rundell --env-set MY_API_SECRET <your-secret>   # optional
+#
+# Run with:  rundell rest_authenticated_api.run
+
+define myCredentials as credentials -->
+    set myCredentials\token          = env("MY_API_TOKEN").
+    # set myCredentials\authentication = env("MY_API_SECRET").  # uncomment if needed
+<--
+
+# --- GET all records ---
+define getUsers() as query returns json -->
+    set getUsers\method      = GET.
+    set getUsers\endpoint    = "https://your-api.example.com/api/users.php".
+    set getUsers\credentials = myCredentials.
+<--
+
+# --- POST to fetch a single record by ID ---
+define getUser(uid as integer) as query returns json -->
+    set getUser\method      = POST.
+    set getUser\endpoint    = "https://your-api.example.com/api/getUser.php".
+    set getUser\credentials = myCredentials.
+    define queryParams as json = {
+        "uid": uid
+    }.
+<--
+
+# --- Run: list all users ---
+print "Loading all users..." + newline().
+
+attempt -->
+    define users as json.
+    set users = await getUsers().
+
+    for each user in users["rows"] -->
+        print user["firstName"] + " " + user["secondName"] + newline().
+    <--
+<-- catch err -->
+    print "Failed to load users." + newline().
+    print "Status:   " + err\statusCode + newline().
+    print "Message:  " + err\message    + newline().
+    print "Endpoint: " + err\endpoint   + newline().
+<--
+
+print newline().
+
+# --- Run: fetch a specific user ---
+print "Loading user 1..." + newline().
+
+attempt -->
+    define user as json.
+    set user = await getUser(1).
+    print user["firstName"] + " " + user["secondName"] + newline().
+<-- catch err -->
+    print "Failed to load user 1: " + err\message + newline().
+<--

@@ -1,0 +1,61 @@
+# gui_contact_book.run
+# A simple contact-book form: add names and emails, view them in a list.
+# Run with:  rundell-gui gui_contact_book.run
+
+define contacts as list of string = [].
+
+define bookForm as form -->
+    set form\title = "Contact Book".
+
+    define nameLbl   as form\label.
+    define nameBox   as form\textbox.
+    define emailLbl  as form\label.
+    define emailBox  as form\textbox.
+    define addBtn    as form\button.
+    define contactList as form\listbox.
+    define statusLbl as form\label.
+
+    set nameLbl\position   = 10px, 10px, 60px, 24px.
+    set nameLbl\value      = "Name:".
+
+    set nameBox\position   = 80px, 10px, 220px, 28px.
+    set nameBox\placeholder = "Full name".
+
+    set emailLbl\position  = 10px, 50px, 60px, 24px.
+    set emailLbl\value     = "Email:".
+
+    set emailBox\position  = 80px, 50px, 220px, 28px.
+    set emailBox\placeholder = "email@example.com".
+
+    set addBtn\position    = 10px, 90px, 100px, 30px.
+    set addBtn\caption     = "Add Contact".
+    set addBtn\click       = addContact().
+
+    set contactList\position = 10px, 135px, 350px, 200px.
+    set contactList\columns  = "Name,Email".
+
+    set statusLbl\position = 10px, 345px, 350px, 24px.
+    set statusLbl\value    = "No contacts yet.".
+<--
+
+define addContact() returns null -->
+    define name  as string = bookForm\nameBox\value.
+    define email as string = bookForm\emailBox\value.
+
+    if (name == "") -->
+        set bookForm\statusLbl\value = "Please enter a name.".
+        return null.
+    <--
+
+    define entry as string = name + "," + email.
+    append entry to contacts.
+
+    set bookForm\nameBox\value  = "".
+    set bookForm\emailBox\value = "".
+
+    define count as integer = length(contacts).
+    set bookForm\statusLbl\value = string(count) + " contact(s) stored.".
+    return null.
+<--
+
+rootWindow\bookForm\show().

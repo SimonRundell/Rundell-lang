@@ -1,0 +1,53 @@
+# gui_temperature.run
+# Temperature converter with a graphical form.
+# Run with:  rundell-gui gui_temperature.run
+
+define tempForm as form -->
+    set form\title = "Temperature Converter".
+
+    define inputLbl  as form\label.
+    define inputBox  as form\textbox.
+    define dirBox    as form\select.
+    define convertBtn as form\button.
+    define outputLbl as form\label.
+
+    set inputLbl\position  = 10px, 10px, 120px, 24px.
+    set inputLbl\value     = "Temperature:".
+
+    set inputBox\position  = 130px, 10px, 120px, 28px.
+    set inputBox\placeholder = "0.0".
+
+    set dirBox\position    = 10px, 50px, 240px, 28px.
+    set dirBox\options     = "Celsius to Fahrenheit,Fahrenheit to Celsius".
+
+    set convertBtn\position = 10px, 90px, 120px, 30px.
+    set convertBtn\caption  = "Convert".
+    set convertBtn\click    = convert().
+
+    set outputLbl\position = 10px, 135px, 340px, 28px.
+    set outputLbl\value    = "Result will appear here.".
+<--
+
+define convert() returns null -->
+    define raw as string = tempForm\inputBox\value.
+    define dir as string = tempForm\dirBox\value.
+    define res as string = "".
+
+    try -->
+        define t as float = float(raw).
+        if (dir == "Celsius to Fahrenheit") -->
+            define f as float = t * 1.8 + 32.0.
+            set res = string(t) + " °C  =  " + string(f) + " °F".
+        <--
+        if (dir == "Fahrenheit to Celsius") -->
+            define c as float = (t - 32.0) / 1.8.
+            set res = string(t) + " °F  =  " + string(c) + " °C".
+        <--
+        set tempForm\outputLbl\value = res.
+    catch (TypeError) -->
+        set tempForm\outputLbl\value = "Please enter a valid number.".
+    <--
+    return null.
+<--
+
+rootWindow\tempForm\show().

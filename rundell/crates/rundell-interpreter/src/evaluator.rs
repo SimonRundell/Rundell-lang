@@ -9,14 +9,51 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use rundell_parser::ast::{
-    BinOp, CmpOp, DefineStmt, Expr, ForEachStmt, ForLoopStmt, FunctionDefStmt, IfStmt, Literal,
-    ReceiveStmt, RundellType, SetOp, SetStmt, SetTarget, Stmt, SwitchPattern, TryCatchStmt,
-    UnaryOp, WhileLoopStmt,
+    BinOp, CmpOp, DefineStmt, DialogCall, Expr, ForEachStmt, ForLoopStmt,
+    FormDefinition, FunctionDefStmt, IfStmt, Literal, ReceiveStmt, RundellType,
+    SetOp, SetStmt, SetTarget, Stmt, SwitchPattern, TryCatchStmt, UnaryOp, WhileLoopStmt,
 };
 use rundell_parser::parse;
 
 use crate::environment::Environment;
 use crate::error::RuntimeError;
+use crate::form_registry::{default_control_state, FormInstance, RundellWindow};
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// Timeout in milliseconds for blocking on a modal form.
+pub const MODAL_TIMEOUT_MS: u64 = 30_000;
+
+/// Default timeout for all query calls, in milliseconds.
+/// Override per-query using: set myQuery\timeout = <ms>.
+pub const QUERY_TIMEOUT_MS: u64 = 10_000;
+
+// ---------------------------------------------------------------------------
+// Credentials and query registry
+// ---------------------------------------------------------------------------
+
+/// A resolved credentials instance — plaintext values in memory for program lifetime.
+#[derive(Debug, Clone)]
+pub struct CredentialsInstance {
+    /// JWT bearer token (from env()).
+    pub token: Option<String>,
+    /// X-Rundell-Auth header value (from env()).
+    pub authentication: Option<String>,
+}
+
+/// Registry of all query definitions seen during program execution.
+#[derive(Debug, Default)]
+pub struct QueryRegistry {
+    pub queries: HashMap<String, rundell_parser::ast::QueryDefinition>,
+}
+
+/// Registry of all resolved credentials instances.
+#[derive(Debug, Default)]
+pub struct CredentialsRegistry {
+    pub credentials: HashMap<String, CredentialsInstance>,
+}
 
 // ---------------------------------------------------------------------------
 // Value type
@@ -126,6 +163,22 @@ pub struct Interpreter {
     stdout: Box<dyn Write>,
     /// Stdin reader (allows substitution in tests).
     stdin: Box<dyn BufRead>,
+    /// The global rootWindow — the root of all form access.
+    pub root_window: RundellWindow,
+    /// Sender for GUI commands (None when running headless / in tests).
+    pub gui_tx: Option<std::sync::mpsc::SyncSender<crate::gui_channel::GuiCommand>>,
+    /// Receiver for GUI responses (None when running headless / in tests).
+    pub gui_rx: Option<std::sync::mpsc::Receiver<crate::gui_channel::GuiResponse>>,
+    /// Name of the form currently being defined (used inside exec_form_stmt).
+    pub(crate) current_form_name: Option<String>,
+    /// Path to the running .run source file (needed to locate .rundell.env).
+    pub program_path: Option<PathBuf>,
+    /// Tokio async runtime for executing HTTP requests.
+    pub rt: tokio::runtime::Runtime,
+    /// Registry of query definitions.
+    pub query_registry: QueryRegistry,
+    /// Registry of resolved credentials instances.
+    pub credentials_registry: CredentialsRegistry,
 }
 
 impl Default for Interpreter {
@@ -144,6 +197,14 @@ impl Interpreter {
             import_stack: Vec::new(),
             stdout: Box::new(io::stdout()),
             stdin: Box::new(io::BufReader::new(io::stdin())),
+            root_window: RundellWindow::default(),
+            gui_tx: None,
+            gui_rx: None,
+            current_form_name: None,
+            program_path: None,
+            rt: tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime"),
+            query_registry: QueryRegistry::default(),
+            credentials_registry: CredentialsRegistry::default(),
         }
     }
 
@@ -156,6 +217,14 @@ impl Interpreter {
             import_stack: Vec::new(),
             stdout: out,
             stdin: Box::new(io::BufReader::new(io::stdin())),
+            root_window: RundellWindow::default(),
+            gui_tx: None,
+            gui_rx: None,
+            current_form_name: None,
+            program_path: None,
+            rt: tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime"),
+            query_registry: QueryRegistry::default(),
+            credentials_registry: CredentialsRegistry::default(),
         }
     }
 
@@ -163,6 +232,12 @@ impl Interpreter {
     /// the source file being executed).
     pub fn set_source_dir(&mut self, dir: PathBuf) {
         self.source_dir = dir;
+    }
+
+    /// Sets the path to the running source file.
+    /// Used to locate the adjacent .rundell.env credential store.
+    pub fn set_program_path(&mut self, path: PathBuf) {
+        self.program_path = Some(path);
     }
 
     /// Execute a program (list of statements).
@@ -212,6 +287,40 @@ impl Interpreter {
                 self.eval_expr(expr)?;
                 Ok(())
             }
+            Stmt::FormDef(fd) => self.exec_form_def(fd),
+            Stmt::DefineControl(name, _ctrl_type) => {
+                // DefineControl outside a form body — log a warning and continue.
+                eprintln!("[WARN] DefineControl '{}' outside form body — ignored", name);
+                Ok(())
+            }
+            Stmt::CredentialsDef(def) => {
+                let token = if let Some(expr) = def.token {
+                    Some(match self.eval_expr(expr)? {
+                        Value::Str(s) => s,
+                        other => other.to_display_string(),
+                    })
+                } else {
+                    None
+                };
+                let authentication = if let Some(expr) = def.authentication {
+                    Some(match self.eval_expr(expr)? {
+                        Value::Str(s) => s,
+                        other => other.to_display_string(),
+                    })
+                } else {
+                    None
+                };
+                self.credentials_registry.credentials.insert(
+                    def.name.clone(),
+                    CredentialsInstance { token, authentication },
+                );
+                Ok(())
+            }
+            Stmt::QueryDef(def) => {
+                self.query_registry.queries.insert(def.name.clone(), def);
+                Ok(())
+            }
+            Stmt::Attempt(block) => self.exec_attempt(block),
         }
     }
 
@@ -321,6 +430,7 @@ impl Interpreter {
                 // col_expr should resolve to an Identifier ultimately
                 self.set_index(*col_expr, *key_expr, new_val)
             }
+            SetTarget::ObjectPath(path) => self.exec_set_object_path(path, s.op),
         }
     }
 
@@ -868,6 +978,21 @@ impl Interpreter {
                 Ok(Value::Boolean(!matches!(val, Value::Null)))
             }
             Expr::JsonLiteral(v) => Ok(Value::Json(v)),
+            Expr::ObjectPath(segs) => self.eval_object_path(segs),
+            Expr::PixelValue(n) => Ok(Value::Integer(n as i64)),
+            Expr::PositionLiteral(top, left, width, height) => {
+                Ok(Value::Json(serde_json::json!([top, left, width, height])))
+            }
+            Expr::ShowForm { path, modal } => {
+                self.exec_show_form(path, modal)?;
+                Ok(Value::Null)
+            }
+            Expr::CloseForm { path } => {
+                self.exec_close_form(path)?;
+                Ok(Value::Null)
+            }
+            Expr::Dialog(call) => self.eval_dialog_call(*call),
+            Expr::Await(await_expr) => self.eval_await(*await_expr),
         }
     }
 
@@ -1150,6 +1275,41 @@ impl Interpreter {
                 self.exec_append(col_expr, val_expr)
             }
 
+            "env" => {
+                if args.len() != 1 {
+                    return Err(RuntimeError::RuntimeError(
+                        "env() requires exactly one argument".to_string(),
+                    ));
+                }
+                let key = match self.eval_expr(args.into_iter().next().unwrap())? {
+                    Value::Str(s) => s,
+                    other => {
+                        return Err(RuntimeError::TypeError(format!(
+                            "env() argument must be a string, got {}",
+                            other.type_name()
+                        )))
+                    }
+                };
+                let env_path = match &self.program_path {
+                    Some(p) => p
+                        .parent()
+                        .unwrap_or(std::path::Path::new("."))
+                        .join(".rundell.env"),
+                    None => return Err(RuntimeError::NoProgramPath),
+                };
+                rundell_env::env_get(&env_path, &key)
+                    .map(Value::Str)
+                    .map_err(|e| match e {
+                        rundell_env::EnvError::KeyNotFound(_) => {
+                            RuntimeError::EnvKeyNotFound { key: key.clone() }
+                        }
+                        rundell_env::EnvError::DecryptionFailed(_) => {
+                            RuntimeError::EnvDecryptionFailed { key: key.clone() }
+                        }
+                        rundell_env::EnvError::Io(msg) => RuntimeError::IOError(msg),
+                    })
+            }
+
             other => Err(RuntimeError::RuntimeError(format!(
                 "unknown built-in: {other}"
             ))),
@@ -1207,6 +1367,617 @@ impl Interpreter {
             Err(RuntimeError::ReturnValue(val)) => Ok(val.unwrap_or(Value::Null)),
             Err(e) => Err(e),
         }
+    }
+
+    /// Call a named function with pre-evaluated `Value` arguments.
+    pub fn call_function(&mut self, name: &str, args: Vec<Value>) -> Result<Value, RuntimeError> {
+        let func =
+            self.functions.get(name).cloned().ok_or_else(|| {
+                RuntimeError::RuntimeError(format!("undefined function '{name}'"))
+            })?;
+
+        if args.len() != func.params.len() {
+            return Err(RuntimeError::RuntimeError(format!(
+                "function '{name}' expects {} arguments, got {}",
+                func.params.len(),
+                args.len()
+            )));
+        }
+
+        self.env.push_scope();
+        for (param, val) in func.params.iter().zip(args) {
+            let coerced = coerce_to_declared_type(val, &param.typ);
+            self.env.define(&param.name, coerced, param.typ.clone(), true)?;
+        }
+
+        let result = self.run_body(func.body.clone());
+        self.env.pop_scope();
+
+        match result {
+            Ok(()) => Ok(Value::Null),
+            Err(RuntimeError::ReturnValue(val)) => Ok(val.unwrap_or(Value::Null)),
+            Err(e) => Err(e),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // GUI form methods
+    // -----------------------------------------------------------------------
+
+    /// Execute a form definition: register the form in rootWindow.
+    fn exec_form_def(&mut self, fd: FormDefinition) -> Result<(), RuntimeError> {
+        let form_name = fd.name.clone();
+        // Create a fresh form instance and register it.
+        let form = FormInstance::new();
+        self.root_window.forms.insert(form_name.clone(), form);
+
+        // Track the current form being built so exec_form_stmt can use it.
+        let prev_form = self.current_form_name.take();
+        self.current_form_name = Some(form_name.clone());
+
+        for stmt in fd.body {
+            self.exec_form_stmt(&form_name.clone(), stmt)?;
+        }
+
+        self.current_form_name = prev_form;
+        Ok(())
+    }
+
+    /// Execute a statement inside a form definition body.
+    fn exec_form_stmt(&mut self, form_name: &str, stmt: Stmt) -> Result<(), RuntimeError> {
+        match stmt {
+            Stmt::DefineControl(ctrl_name, ctrl_type) => {
+                let state = default_control_state(&ctrl_type);
+                if let Some(form) = self.root_window.forms.get_mut(form_name) {
+                    form.controls.insert(ctrl_name, state);
+                }
+                Ok(())
+            }
+            Stmt::Set(set_stmt) => {
+                match set_stmt.target {
+                    SetTarget::ObjectPath(path) => {
+                        self.exec_set_object_path(path, set_stmt.op)
+                    }
+                    _ => self.exec_set(set_stmt),
+                }
+            }
+            // Allow other statements in the form body for flexibility.
+            other => self.exec_stmt(other),
+        }
+    }
+
+    /// Execute `set <object-path> <op>`.
+    fn exec_set_object_path(&mut self, path: Vec<String>, op: SetOp) -> Result<(), RuntimeError> {
+        // Evaluate the value first (before mutably borrowing root_window).
+        let value = match op {
+            SetOp::Assign(expr) => self.eval_expr(expr)?,
+            SetOp::Increment | SetOp::Decrement => {
+                let current = self.eval_object_path(path.clone())?;
+                match (current, &op) {
+                    (Value::Integer(n), SetOp::Increment) => Value::Integer(n + 1),
+                    (Value::Integer(n), SetOp::Decrement) => Value::Integer(n - 1),
+                    _ => return Err(RuntimeError::TypeError(
+                        "++ / -- on object path requires integer value".to_string()
+                    )),
+                }
+            }
+        };
+        self.set_object_path_value(&path, value)
+    }
+
+    /// Write a value to an object path in rootWindow.
+    fn set_object_path_value(&mut self, path: &[String], value: Value) -> Result<(), RuntimeError> {
+        // Resolve relative paths inside form bodies.
+        //   "form\prop"         → current_form_name\prop
+        //   "controlName\prop"  → current_form_name\controlName\prop
+        //                         (when first segment is not a known form and not rootWindow)
+        let expanded: Option<Vec<String>> = {
+            let first = path.first().map(|s| s.as_str()).unwrap_or("");
+            if first == "form" {
+                self.current_form_name.as_ref().map(|fname| {
+                    std::iter::once(fname.clone())
+                        .chain(path[1..].iter().cloned())
+                        .collect()
+                })
+            } else if first != "rootWindow" {
+                if let Some(ref fname) = self.current_form_name {
+                    if !self.root_window.forms.contains_key(first) {
+                        Some(std::iter::once(fname.clone())
+                            .chain(path.iter().cloned())
+                            .collect())
+                    } else { None }
+                } else { None }
+            } else { None }
+        };
+        let effective_path: &[String] = expanded.as_deref().unwrap_or(path);
+
+        let (form_name, rest) = self.resolve_path_root(effective_path)?;
+
+        match rest {
+            [control_name, prop] if prop == "position" => {
+                // Value should be JSON array [top, left, width, height]
+                if let Value::Json(serde_json::Value::Array(ref arr)) = value {
+                    if arr.len() == 4 {
+                        let nums: Vec<u32> = arr.iter()
+                            .map(|v| v.as_u64().unwrap_or(0) as u32)
+                            .collect();
+                        let form = self.root_window.forms.get_mut(&form_name)
+                            .ok_or_else(|| RuntimeError::RuntimeError(
+                                format!("no form named '{}' in rootWindow", form_name)
+                            ))?;
+                        if let Some(ctrl) = form.controls.get_mut(control_name) {
+                            ctrl.set_position(nums[0], nums[1], nums[2], nums[3]);
+                        } else {
+                            eprintln!("[WARN] no control named '{}' in form '{}'", control_name, form_name);
+                        }
+                        return Ok(());
+                    }
+                }
+                eprintln!("[WARN] position value is not a 4-element JSON array: {:?}", value);
+                Ok(())
+            }
+            [control_name, prop] => {
+                let val_str = value_to_string(&value);
+                let form = self.root_window.forms.get_mut(&form_name)
+                    .ok_or_else(|| RuntimeError::RuntimeError(
+                        format!("no form named '{}' in rootWindow", form_name)
+                    ))?;
+                if let Some(ctrl) = form.controls.get_mut(control_name) {
+                    if let Err(warn) = ctrl.set_property(prop, &val_str) {
+                        eprintln!("{warn}");
+                    }
+                } else {
+                    eprintln!("[WARN] no control named '{}' in form '{}'", control_name, form_name);
+                }
+                Ok(())
+            }
+            [prop] => {
+                // set formname\property = value  (form-level property)
+                let val_str = value_to_string(&value);
+                let form = self.root_window.forms.get_mut(&form_name)
+                    .ok_or_else(|| RuntimeError::RuntimeError(
+                        format!("no form named '{}' in rootWindow", form_name)
+                    ))?;
+                if let Err(warn) = form.properties.set_property(prop, &val_str) {
+                    eprintln!("{warn}");
+                }
+                Ok(())
+            }
+            _ => Err(RuntimeError::RuntimeError(
+                format!("invalid object path: {:?}", path)
+            )),
+        }
+    }
+
+    /// Read a value from an object path.
+    fn eval_object_path(&self, path: Vec<String>) -> Result<Value, RuntimeError> {
+        // Resolve relative paths inside form bodies.
+        //   "form\prop"         → current_form_name\prop
+        //   "controlName\prop"  → current_form_name\controlName\prop
+        //                         (when first segment is not a known form and not rootWindow)
+        let expanded: Option<Vec<String>> = {
+            let first = path.first().map(|s| s.as_str()).unwrap_or("");
+            if first == "form" {
+                self.current_form_name.as_ref().map(|fname| {
+                    std::iter::once(fname.clone())
+                        .chain(path[1..].iter().cloned())
+                        .collect()
+                })
+            } else if first != "rootWindow" {
+                if let Some(ref fname) = self.current_form_name {
+                    if !self.root_window.forms.contains_key(first) {
+                        Some(std::iter::once(fname.clone())
+                            .chain(path.iter().cloned())
+                            .collect())
+                    } else { None }
+                } else { None }
+            } else { None }
+        };
+        let effective_path: &[String] = expanded.as_deref().unwrap_or(&path);
+
+        let (form_name, rest) = self.resolve_path_root(effective_path)?;
+
+        match rest {
+            [prop] => {
+                let form = self.root_window.forms.get(&form_name)
+                    .ok_or_else(|| RuntimeError::RuntimeError(
+                        format!("no form named '{}' in rootWindow", form_name)
+                    ))?;
+                let val = form.properties.get_property(prop)
+                    .ok_or_else(|| RuntimeError::RuntimeError(
+                        format!("no property '{}' on form '{}'", prop, form_name)
+                    ))?;
+                Ok(Value::Str(val))
+            }
+            [control_name, prop] => {
+                let form = self.root_window.forms.get(&form_name)
+                    .ok_or_else(|| RuntimeError::RuntimeError(
+                        format!("no form named '{}' in rootWindow", form_name)
+                    ))?;
+                let ctrl = form.controls.get(control_name)
+                    .ok_or_else(|| RuntimeError::RuntimeError(
+                        format!("no control named '{}' in form '{}'", control_name, form_name)
+                    ))?;
+                let val = ctrl.get_property(prop)
+                    .ok_or_else(|| RuntimeError::RuntimeError(
+                        format!("no property '{}' on control '{}' in form '{}'", prop, control_name, form_name)
+                    ))?;
+                Ok(Value::Str(val))
+            }
+            _ => Err(RuntimeError::RuntimeError(
+                format!("invalid object path for read: {:?}", path)
+            )),
+        }
+    }
+
+    /// Resolve the "root" of an object path, skipping optional "rootWindow" prefix.
+    /// Returns (form_name, remaining_segments).
+    fn resolve_path_root<'a>(&self, path: &'a [String]) -> Result<(String, &'a [String]), RuntimeError> {
+        match path {
+            [first, rest @ ..] if first == "rootWindow" => {
+                match rest {
+                    [form_name, rest2 @ ..] => Ok((form_name.clone(), rest2)),
+                    _ => Err(RuntimeError::RuntimeError(
+                        "object path after 'rootWindow' must include form name".to_string()
+                    )),
+                }
+            }
+            [form_name, rest @ ..] => Ok((form_name.clone(), rest)),
+            [] => Err(RuntimeError::RuntimeError("empty object path".to_string())),
+        }
+    }
+
+    /// Execute `show()` — open a form.
+    fn exec_show_form(&mut self, path: Vec<String>, modal: bool) -> Result<(), RuntimeError> {
+        let (form_name, _) = self.resolve_path_root(&path)?;
+
+        if form_name == "rootWindow" {
+            return Err(RuntimeError::RuntimeError(
+                "ReservedIdentifier(\"rootWindow\")".to_string()
+            ));
+        }
+
+        let form = self.root_window.forms.get_mut(&form_name)
+            .ok_or_else(|| RuntimeError::RuntimeError(
+                format!("no form named '{}' in rootWindow", form_name)
+            ))?;
+        form.is_open = true;
+        form.is_modal = modal;
+
+        // Phase 8: No actual GUI window yet. Send command if channel is present.
+        if let Some(ref tx) = self.gui_tx {
+            let _ = tx.send(crate::gui_channel::GuiCommand::ShowForm {
+                name: form_name.clone(),
+                modal,
+            });
+        }
+        if modal && self.gui_rx.is_some() {
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_millis(MODAL_TIMEOUT_MS);
+            loop {
+                if std::time::Instant::now() > deadline {
+                    eprintln!("[WARN] modal form '{}' timed out after {}ms", form_name, MODAL_TIMEOUT_MS);
+                    break;
+                }
+                // Receive without holding a borrow across the dispatch call.
+                let msg = self.gui_rx.as_ref().and_then(|rx| rx.try_recv().ok());
+                match msg {
+                    Some(crate::gui_channel::GuiResponse::FormClosed { name }) if name == form_name => break,
+                    Some(crate::gui_channel::GuiResponse::EventFired { form, control, event }) => {
+                        let _ = self.dispatch_event(&form, &control, &event);
+                    }
+                    None => std::thread::sleep(std::time::Duration::from_millis(10)),
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Execute `close()` — close a form.
+    fn exec_close_form(&mut self, path: Vec<String>) -> Result<(), RuntimeError> {
+        let (form_name, _) = self.resolve_path_root(&path)?;
+        if let Some(form) = self.root_window.forms.get_mut(&form_name) {
+            form.is_open = false;
+        }
+        if let Some(ref tx) = self.gui_tx {
+            let _ = tx.send(crate::gui_channel::GuiCommand::CloseForm { name: form_name });
+        }
+        Ok(())
+    }
+
+    /// Evaluate a dialog call. Phase 8: returns empty string / default values.
+    fn eval_dialog_call(&mut self, call: DialogCall) -> Result<Value, RuntimeError> {
+        match call {
+            DialogCall::OpenFile { .. } | DialogCall::SaveFile { .. } => Ok(Value::Str(String::new())),
+            DialogCall::Message { .. } => Ok(Value::Str("ok".to_string())),
+            DialogCall::ColorPicker { initial } => {
+                let val = self.eval_expr(*initial)?;
+                Ok(val)
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // REST / query methods
+    // -----------------------------------------------------------------------
+
+    /// Execute an `attempt / catch` error-handling block.
+    fn exec_attempt(&mut self, block: rundell_parser::ast::AttemptBlock) -> Result<(), RuntimeError> {
+        let body_result = {
+            self.env.push_scope();
+            let r = self.run_body(block.body.clone());
+            self.env.pop_scope();
+            r
+        };
+
+        match body_result {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let is_catchable = matches!(
+                    &e,
+                    RuntimeError::QueryTimeout { .. }
+                        | RuntimeError::QueryNetworkError { .. }
+                        | RuntimeError::QueryHttpError { .. }
+                        | RuntimeError::QueryInvalidJson { .. }
+                        | RuntimeError::UndefinedQuery { .. }
+                        | RuntimeError::UndefinedCredentials { .. }
+                        | RuntimeError::EnvKeyNotFound { .. }
+                        | RuntimeError::EnvDecryptionFailed { .. }
+                        | RuntimeError::NoProgramPath
+                );
+
+                if !is_catchable {
+                    return Err(e);
+                }
+
+                let (message, status_code, endpoint) = match &e {
+                    RuntimeError::QueryTimeout { endpoint, timeout_ms } => (
+                        format!("Query timed out after {}ms", timeout_ms),
+                        0u16,
+                        endpoint.clone(),
+                    ),
+                    RuntimeError::QueryNetworkError { message, endpoint } => (
+                        message.clone(),
+                        0u16,
+                        endpoint.clone(),
+                    ),
+                    RuntimeError::QueryHttpError { status_code, endpoint } => (
+                        format!("HTTP error {} from {}", status_code, endpoint),
+                        *status_code,
+                        endpoint.clone(),
+                    ),
+                    RuntimeError::QueryInvalidJson { endpoint } => (
+                        format!("Response from {} is not valid JSON", endpoint),
+                        0u16,
+                        endpoint.clone(),
+                    ),
+                    _ => (e.to_string(), 0u16, String::new()),
+                };
+
+                let error_obj = serde_json::json!({
+                    "message": message,
+                    "statusCode": status_code,
+                    "endpoint": endpoint,
+                });
+
+                // Bind the error variable in the current scope so the handler can read it.
+                // We use define (not set) since it may not exist yet.
+                let scope_pushed = if self.env.get(&block.error_name).is_err() {
+                    self.env.push_scope();
+                    self.env.define(
+                        &block.error_name,
+                        Value::Json(error_obj),
+                        RundellType::Json,
+                        false,
+                    )?;
+                    true
+                } else {
+                    self.env.set(&block.error_name, Value::Json(error_obj))?;
+                    false
+                };
+
+                let handler_result = self.run_body(block.handler.clone());
+
+                if scope_pushed {
+                    self.env.pop_scope();
+                }
+
+                handler_result
+            }
+        }
+    }
+
+    /// Helper: evaluate an expression with extra local variable bindings in scope.
+    fn eval_expr_with_locals(
+        &mut self,
+        expr: &Expr,
+        locals: &HashMap<String, Value>,
+    ) -> Result<Value, RuntimeError> {
+        self.env.push_scope();
+        for (name, val) in locals {
+            // Ignore errors from shadowing (e.g. already defined in outer scope).
+            let _ = self.env.define(name, val.clone(), RundellType::Json, false);
+        }
+        let result = self.eval_expr(expr.clone());
+        self.env.pop_scope();
+        result
+    }
+
+    /// Evaluate an `await queryCall(...)` expression — performs the HTTP request.
+    fn eval_await(
+        &mut self,
+        await_expr: rundell_parser::ast::AwaitExpr,
+    ) -> Result<Value, RuntimeError> {
+        // The inner expression must be a function call.
+        let (query_name, call_args) = match *await_expr.call {
+            Expr::Call(name, args) => (name, args),
+            _ => {
+                return Err(RuntimeError::RuntimeError(
+                    "await must be followed by a query call".to_string(),
+                ))
+            }
+        };
+
+        // Look up the query definition.
+        let query_def = self
+            .query_registry
+            .queries
+            .get(&query_name)
+            .ok_or_else(|| RuntimeError::UndefinedQuery { name: query_name.clone() })?
+            .clone();
+
+        // Evaluate call arguments and bind to parameters.
+        let mut local_env: HashMap<String, Value> = HashMap::new();
+        for (param, arg_expr) in query_def.params.iter().zip(call_args.iter()) {
+            let val = self.eval_expr(arg_expr.clone())?;
+            local_env.insert(param.name.clone(), val);
+        }
+
+        // Evaluate endpoint with parameter substitution.
+        let endpoint_val = self.eval_expr_with_locals(&query_def.endpoint, &local_env)?;
+        let endpoint = match endpoint_val {
+            Value::Str(s) => s,
+            _ => {
+                return Err(RuntimeError::TypeError(
+                    "query endpoint must evaluate to a string".to_string(),
+                ))
+            }
+        };
+
+        // Resolve credentials.
+        let creds: Option<CredentialsInstance> = if let Some(creds_name) = &query_def.credentials {
+            let inst = self
+                .credentials_registry
+                .credentials
+                .get(creds_name)
+                .ok_or_else(|| RuntimeError::UndefinedCredentials { name: creds_name.clone() })?
+                .clone();
+            Some(inst)
+        } else {
+            None
+        };
+
+        // Determine timeout.
+        let timeout_ms = if let Some(ref t_expr) = query_def.timeout_ms {
+            match self.eval_expr_with_locals(t_expr, &local_env)? {
+                Value::Integer(ms) => ms as u64,
+                _ => QUERY_TIMEOUT_MS,
+            }
+        } else {
+            QUERY_TIMEOUT_MS
+        };
+
+        // Evaluate POST body before moving into async block.
+        let post_body: Option<String> = if matches!(query_def.method, rundell_parser::ast::HttpMethod::Post) {
+            if let Some(ref qp_expr) = query_def.query_params {
+                let qp_val = self.eval_expr_with_locals(qp_expr, &local_env)?;
+                match qp_val {
+                    Value::Json(json_val) => Some(json_val.to_string()),
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "queryParams must be a json value".to_string(),
+                        ))
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Clone everything needed for the async block.
+        let endpoint_clone = endpoint.clone();
+        let method = query_def.method.clone();
+        let token = creds.as_ref().and_then(|c| c.token.clone());
+        let authentication = creds.as_ref().and_then(|c| c.authentication.clone());
+
+        // Build and execute the request inside the Tokio runtime.
+        let result = self.rt.block_on(async move {
+            let client = reqwest::Client::new();
+            let mut req_builder = match method {
+                rundell_parser::ast::HttpMethod::Get => client.get(&endpoint_clone),
+                rundell_parser::ast::HttpMethod::Post => client.post(&endpoint_clone),
+            };
+
+            if let Some(ref tok) = token {
+                req_builder = req_builder.header("Authorization", format!("Bearer {}", tok));
+            }
+            if let Some(ref auth) = authentication {
+                req_builder = req_builder.header("X-Rundell-Auth", auth.as_str());
+            }
+
+            if let Some(body) = post_body {
+                req_builder = req_builder
+                    .header("Content-Type", "application/json")
+                    .body(body);
+            }
+
+            let request = req_builder.build().map_err(|e| RuntimeError::QueryNetworkError {
+                message: e.to_string(),
+                endpoint: endpoint_clone.clone(),
+            })?;
+
+            let response = tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                client.execute(request),
+            )
+            .await
+            .map_err(|_| RuntimeError::QueryTimeout {
+                endpoint: endpoint_clone.clone(),
+                timeout_ms,
+            })?
+            .map_err(|e| RuntimeError::QueryNetworkError {
+                message: e.to_string(),
+                endpoint: endpoint_clone.clone(),
+            })?;
+
+            if response.status().is_client_error() || response.status().is_server_error() {
+                return Err(RuntimeError::QueryHttpError {
+                    status_code: response.status().as_u16(),
+                    endpoint: endpoint_clone.clone(),
+                });
+            }
+
+            let body_text = response.text().await.map_err(|e| RuntimeError::QueryNetworkError {
+                message: e.to_string(),
+                endpoint: endpoint_clone.clone(),
+            })?;
+
+            let json_val: serde_json::Value = serde_json::from_str(&body_text)
+                .map_err(|_| RuntimeError::QueryInvalidJson {
+                    endpoint: endpoint_clone.clone(),
+                })?;
+
+            Ok(json_val)
+        });
+
+        result.map(Value::Json)
+    }
+
+    /// Dispatch a GUI event to the registered callback function.
+    pub fn dispatch_event(&mut self, form: &str, control: &str, event: &str) -> Result<(), RuntimeError> {
+        use crate::form_registry::ControlState;
+
+        let callback = self.root_window.forms.get(form)
+            .and_then(|f| f.controls.get(control))
+            .and_then(|c| match (c, event) {
+                (ControlState::Button { on_click, .. }, "click") => on_click.clone(),
+                (ControlState::Textbox { on_change, .. }, "change") => on_change.clone(),
+                (ControlState::Radiobutton { on_change, .. }, "change") => on_change.clone(),
+                (ControlState::Checkbox { on_change, .. }, "change") => on_change.clone(),
+                (ControlState::Switch { on_change, .. }, "change") => on_change.clone(),
+                (ControlState::Select { on_change, .. }, "change") => on_change.clone(),
+                (ControlState::Listbox { on_change, .. }, "change") => on_change.clone(),
+                (ControlState::Listbox { on_select, .. }, "select") => on_select.clone(),
+                _ => None,
+            });
+
+        if let Some(fn_name) = callback {
+            self.call_function(&fn_name, vec![])?;
+        }
+        Ok(())
     }
 }
 
@@ -1715,7 +2486,22 @@ fn runtime_error_name(err: &RuntimeError) -> String {
         RuntimeError::IOError(_) => "IOError".to_string(),
         RuntimeError::RuntimeError(_) => "RuntimeError".to_string(),
         RuntimeError::ReturnValue(_) => "ReturnValue".to_string(),
+        RuntimeError::QueryTimeout { .. } => "QueryTimeout".to_string(),
+        RuntimeError::QueryNetworkError { .. } => "QueryNetworkError".to_string(),
+        RuntimeError::QueryHttpError { .. } => "QueryHttpError".to_string(),
+        RuntimeError::QueryInvalidJson { .. } => "QueryInvalidJson".to_string(),
+        RuntimeError::UndefinedQuery { .. } => "UndefinedQuery".to_string(),
+        RuntimeError::UndefinedCredentials { .. } => "UndefinedCredentials".to_string(),
+        RuntimeError::EnvKeyNotFound { .. } => "EnvKeyNotFound".to_string(),
+        RuntimeError::EnvDecryptionFailed { .. } => "EnvDecryptionFailed".to_string(),
+        RuntimeError::NoProgramPath => "NoProgramPath".to_string(),
+        RuntimeError::UnsupportedHttpMethod => "UnsupportedHttpMethod".to_string(),
     }
+}
+
+/// Convert a Value to its string representation for property storage.
+fn value_to_string(value: &Value) -> String {
+    value.to_display_string()
 }
 
 /// Returns true if `name` is a built-in function.
@@ -1735,5 +2521,6 @@ fn is_builtin(name: &str) -> bool {
             | "trim"
             | "string"
             | "append"
+            | "env"
     )
 }

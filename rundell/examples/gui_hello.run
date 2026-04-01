@@ -1,0 +1,21 @@
+# gui_hello.run
+# A simple greeting form — the GUI equivalent of hello_world.run.
+# Run with:  rundell-gui gui_hello.run
+
+define myForm as form -->
+    set form\title = "Hello".
+    define nameBox as form\textbox.
+    define okBtn   as form\button.
+    set nameBox\position    = 10px, 10px, 280px, 28px.
+    set nameBox\placeholder = "Enter your name".
+    set okBtn\position      = 10px, 50px, 100px, 30px.
+    set okBtn\caption       = "Say Hello".
+    set okBtn\click         = greet().
+<--
+
+define greet() returns null -->
+    print "Hello, " + myForm\nameBox\value + "!" + newline().
+    return null.
+<--
+
+rootWindow\myForm\show().

@@ -105,6 +105,41 @@ pub enum Expr {
     IsNotNull(Box<Expr>),
     /// A JSON object/array literal.
     JsonLiteral(serde_json::Value),
+
+    // -----------------------------------------------------------------
+    // GUI expressions
+    // -----------------------------------------------------------------
+    /// An object path read: `myForm\myLabel\value` or `rootWindow\myForm\title`.
+    ///
+    /// Segments are the identifiers between `\` separators in order.
+    ObjectPath(Vec<String>),
+
+    /// A pixel dimension value parsed from e.g. `10px`.
+    PixelValue(u32),
+
+    /// A position literal: `top_px, left_px, width_px, height_px`.
+    ///
+    /// Used exclusively as the right-hand side of
+    /// `set <path>\position = top, left, width, height.`
+    PositionLiteral(u32, u32, u32, u32),
+
+    /// `rootWindow\myForm\show()` or `rootWindow\myForm\show(modal)`.
+    ///
+    /// `path` is the object-path segments leading up to (but not including)
+    /// the `show` segment.  `modal` is true when `show(modal)` is used.
+    ShowForm { path: Vec<String>, modal: bool },
+
+    /// `rootWindow\myForm\close()`.
+    ///
+    /// `path` is the object-path segments leading up to `close`.
+    CloseForm { path: Vec<String> },
+
+    /// A `dialog\*` built-in call.
+    Dialog(Box<DialogCall>),
+
+    /// An await expression — evaluates a query call asynchronously.
+    /// e.g.  `set results = await myQuery(1).`
+    Await(Box<AwaitExpr>),
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +168,8 @@ pub enum SetTarget {
     Identifier(String),
     /// Collection-key assignment: `set col["key"] = ...`
     Index(Box<Expr>, Box<Expr>),
+    /// Object-path assignment: `set myForm\myLabel\value = ...`
+    ObjectPath(Vec<String>),
 }
 
 /// The operation performed by a `set` statement.
@@ -333,6 +370,153 @@ pub enum Stmt {
     Remove(Expr),
     /// `append(collection, value)` — append an element to a JSON array.
     Append(Expr, Expr),
-    /// A bare expression statement (typically a void function call).
+    /// A bare expression statement (typically a void function call or
+    /// `show()`/`close()` call).
     ExprStmt(Expr),
+
+    // -----------------------------------------------------------------
+    // GUI statements
+    // -----------------------------------------------------------------
+    /// `define name as form --> ... <--`
+    FormDef(FormDefinition),
+    /// `define name as form\controltype.`  (inside a form body)
+    DefineControl(String, ControlType),
+
+    // -----------------------------------------------------------------
+    // REST / query statements
+    // -----------------------------------------------------------------
+    /// `define name as credentials --> ... <--`
+    CredentialsDef(CredentialsDefinition),
+    /// `define name(params) as query returns json --> ... <--`
+    QueryDef(QueryDefinition),
+    /// `attempt --> ... <-- catch id --> ... <--`
+    Attempt(AttemptBlock),
+}
+
+// ===========================================================================
+// GUI AST nodes
+// ===========================================================================
+
+/// The type of a GUI control.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ControlType {
+    /// Static text label.
+    Label,
+    /// Single-line text input.
+    Textbox,
+    /// Clickable button.
+    Button,
+    /// Mutually-exclusive radio button.
+    Radiobutton,
+    /// Boolean tick-box.
+    Checkbox,
+    /// Yes/no toggle switch.
+    Switch,
+    /// Dropdown single-choice selector.
+    Select,
+    /// Multi-column data-bound list.
+    Listbox,
+}
+
+/// A complete form definition block.
+///
+/// The `body` is a flat list of statements that are executed at form
+/// registration time to configure the form and its controls:
+/// - `Stmt::DefineControl` declarations
+/// - `Stmt::Set` with `SetTarget::ObjectPath` for property/event assignments
+#[derive(Debug, Clone, PartialEq)]
+pub struct FormDefinition {
+    /// The form's Rundell identifier (used as the key in `rootWindow.forms`).
+    pub name: String,
+    /// Statements inside the `define name as form --> ... <--` block.
+    pub body: Vec<Stmt>,
+}
+
+/// Message box kind for `dialog\message(...)`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MessageKind {
+    /// Single OK button.
+    Ok,
+    /// OK and Cancel buttons.
+    OkCancel,
+    /// Yes and No buttons.
+    YesNo,
+}
+
+/// A `dialog\*` built-in call expression.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DialogCall {
+    /// `dialog\openfile(title, filter)` — returns selected path or `""`.
+    OpenFile { title: Box<Expr>, filter: Box<Expr> },
+    /// `dialog\savefile(title, filter)` — returns chosen path or `""`.
+    SaveFile { title: Box<Expr>, filter: Box<Expr> },
+    /// `dialog\message(title, message, kind)` — returns `"ok"`, `"cancel"`,
+    /// `"yes"`, or `"no"`.
+    Message {
+        title: Box<Expr>,
+        message: Box<Expr>,
+        kind: MessageKind,
+    },
+    /// `dialog\colorpicker(initial)` — returns chosen `"#RRGGBB"` or `initial`.
+    ColorPicker { initial: Box<Expr> },
+}
+
+// ===========================================================================
+// REST / query AST nodes
+// ===========================================================================
+
+/// The HTTP method for a query.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HttpMethod {
+    Get,
+    Post,
+}
+
+/// A credentials definition — a named, reusable authentication block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CredentialsDefinition {
+    /// The Rundell identifier for this credentials object.
+    pub name: String,
+    /// The JWT bearer token expression (typically an env() call).
+    pub token: Option<Expr>,
+    /// The authentication value expression (typically an env() call).
+    pub authentication: Option<Expr>,
+}
+
+/// A query definition — a named, parameterised REST call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryDefinition {
+    /// The Rundell identifier for this query.
+    pub name: String,
+    /// Optional parameters accepted by the query when called.
+    pub params: Vec<Param>,
+    /// The HTTP method (GET or POST).
+    pub method: HttpMethod,
+    /// The endpoint URL expression.
+    pub endpoint: Expr,
+    /// Reference to a CredentialsDefinition by name, if any.
+    pub credentials: Option<String>,
+    /// Optional per-query timeout in milliseconds.
+    pub timeout_ms: Option<Expr>,
+    /// The queryParams JSON expression (POST only). None for GET requests.
+    pub query_params: Option<Expr>,
+}
+
+/// An await expression — evaluates a query call asynchronously.
+/// e.g.  `set results = await myQuery(1).`
+#[derive(Debug, Clone, PartialEq)]
+pub struct AwaitExpr {
+    /// The function call expression (must resolve to a QueryDefinition call).
+    pub call: Box<Expr>,
+}
+
+/// An attempt/catch block for error handling around query calls.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttemptBlock {
+    /// Statements inside the attempt block.
+    pub body: Vec<Stmt>,
+    /// Identifier bound in the catch block.
+    pub error_name: String,
+    /// Statements inside the catch block.
+    pub handler: Vec<Stmt>,
 }

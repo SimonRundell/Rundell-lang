@@ -34,4 +34,44 @@ pub enum RuntimeError {
     /// This is not a true error; it is caught by the function-call handler.
     #[error("Return: {0:?}")]
     ReturnValue(Option<Value>),
+
+    /// Query timed out waiting for a response.
+    #[error("QueryTimeout: endpoint '{endpoint}' timed out after {timeout_ms}ms")]
+    QueryTimeout { endpoint: String, timeout_ms: u64 },
+
+    /// A network-level error occurred before receiving any response.
+    #[error("QueryNetworkError: {message} (endpoint: {endpoint})")]
+    QueryNetworkError { message: String, endpoint: String },
+
+    /// The server returned an HTTP error status code.
+    #[error("QueryHttpError: HTTP {status_code} from '{endpoint}'")]
+    QueryHttpError { status_code: u16, endpoint: String },
+
+    /// The response body was not valid JSON.
+    #[error("QueryInvalidJson: response from '{endpoint}' is not valid JSON")]
+    QueryInvalidJson { endpoint: String },
+
+    /// A query identifier was called but not found in the registry.
+    #[error("UndefinedQuery: no query named '{name}' is defined")]
+    UndefinedQuery { name: String },
+
+    /// A credentials identifier was referenced but not found.
+    #[error("UndefinedCredentials: no credentials named '{name}' are defined")]
+    UndefinedCredentials { name: String },
+
+    /// env() was called but the key is absent from .rundell.env.
+    #[error("EnvKeyNotFound: key '{key}' not found in .rundell.env")]
+    EnvKeyNotFound { key: String },
+
+    /// env() was called but decryption failed.
+    #[error("EnvDecryptionFailed: failed to decrypt key '{key}' from .rundell.env")]
+    EnvDecryptionFailed { key: String },
+
+    /// env() was called but no program path is set (e.g. in REPL mode).
+    #[error("NoProgramPath: env() cannot be used without a source file path")]
+    NoProgramPath,
+
+    /// An HTTP method other than GET or POST was attempted.
+    #[error("UnsupportedHttpMethod: only GET and POST are supported")]
+    UnsupportedHttpMethod,
 }

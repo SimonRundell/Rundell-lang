@@ -1,0 +1,43 @@
+# rest_dog_api.run
+# Fetches a random dog image URL from the public dog.ceo API.
+# No credentials required.
+# Run with:  rundell rest_dog_api.run
+
+define getRandomDog() as query returns json -->
+    set getRandomDog\method   = GET.
+    set getRandomDog\endpoint = "https://dog.ceo/api/breeds/image/random".
+<--
+
+define getAllBreeds() as query returns json -->
+    set getAllBreeds\method   = GET.
+    set getAllBreeds\endpoint = "https://dog.ceo/api/breeds/list/all".
+<--
+
+# --- Fetch a single random image ---
+print "Fetching a random dog image..." + newline().
+
+attempt -->
+    define dog as json.
+    set dog = await getRandomDog().
+    print "Image URL: " + dog["message"] + newline().
+    print "Status:    " + dog["status"]  + newline().
+<-- catch err -->
+    print "Could not fetch dog image: " + err\message + newline().
+<--
+
+print newline().
+
+# --- Fetch all breeds and list the first few ---
+print "Fetching breed list..." + newline().
+
+attempt -->
+    define breeds as json.
+    set breeds    = await getAllBreeds().
+
+    define breedMap   as json    = breeds["message"].
+    define breedCount as integer = length(breedMap).
+
+    print "Total breeds found: " + string(breedCount) + newline().
+<-- catch err -->
+    print "Could not fetch breeds: " + err\message + newline().
+<--

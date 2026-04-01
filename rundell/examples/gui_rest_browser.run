@@ -1,0 +1,90 @@
+# gui_rest_browser.run
+# A GUI browser for the public dog.ceo API.
+# Shows all breeds in a listbox; click a breed to see a random image URL.
+# No credentials required.
+# Run with:  rundell-gui gui_rest_browser.run
+
+define getBreedList() as query returns json -->
+    set getBreedList\method   = GET.
+    set getBreedList\endpoint = "https://dog.ceo/api/breeds/list/all".
+<--
+
+define getBreedImage(breedName as string) as query returns json -->
+    set getBreedImage\method   = GET.
+    set getBreedImage\endpoint = "https://dog.ceo/api/breed/" + breedName + "/images/random".
+<--
+
+define dogForm as form -->
+    set form\title  = "Dog Breed Browser".
+    set form\width  = 600px.
+    set form\height = 480px.
+
+    define loadBtn   as form\button.
+    define statusLbl as form\label.
+    define breedList as form\listbox.
+    define imageLbl  as form\label.
+    define imageUrl  as form\label.
+
+    set loadBtn\position   = 10px,  10px, 120px, 30px.
+    set loadBtn\caption    = "Load Breeds".
+    set loadBtn\click      = loadBreeds().
+
+    set statusLbl\position = 140px, 10px, 450px, 30px.
+    set statusLbl\value    = "Click Load Breeds to start.".
+
+    set breedList\position = 10px,  50px, 580px, 300px.
+    set breedList\columns  = ["breed"].
+    set breedList\select   = showBreedImage().
+
+    set imageLbl\position  = 10px,  365px, 80px, 24px.
+    set imageLbl\value     = "Image:".
+
+    set imageUrl\position  = 95px,  365px, 495px, 24px.
+    set imageUrl\value     = "".
+<--
+
+# Holds the flat list of breed names for the listbox
+define breedRows as json = { "rows": [] }.
+
+define loadBreeds() returns null -->
+    attempt -->
+        set dogForm\statusLbl\value = "Loading breeds...".
+
+        define apiResult as json.
+        set apiResult = await getBreedList().
+
+        define breedMap as json = apiResult["message"].
+
+        # Rebuild breedRows from scratch
+        set breedRows = { "rows": [] }.
+        for each name in breedMap -->
+            define row as json = { "breed": name }.
+            append(breedRows["rows"], row).
+        <--
+
+        set dogForm\breedList\datasource = breedRows.
+        set dogForm\statusLbl\value = string(length(breedRows["rows"])) + " breeds loaded.".
+    <-- catch err -->
+        set dogForm\statusLbl\value = "Error: " + err\message.
+    <--
+    return null.
+<--
+
+define showBreedImage() returns null -->
+    define selected as json = dogForm\breedList\value.
+    if (selected is null) --> return null. <--
+
+    define breed as string = selected["breed"].
+    set dogForm\imageUrl\value = "Loading...".
+
+    attempt -->
+        define imgResult as json.
+        set imgResult = await getBreedImage(breed).
+        set dogForm\imageUrl\value = imgResult["message"].
+    <-- catch err -->
+        set dogForm\imageUrl\value = "Error: " + err\message.
+    <--
+    return null.
+<--
+
+rootWindow\dogForm\show().

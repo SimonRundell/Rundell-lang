@@ -1,6 +1,6 @@
 # Rundell Language Reference
 
-This document is the complete reference for the Rundell 0.1.0 language.
+This document is the complete reference for the Rundell language.
 
 ---
 
@@ -24,8 +24,19 @@ This document is the complete reference for the Rundell 0.1.0 language.
 16. [Collections (json)](#16-collections-json)
 17. [Error Handling](#17-error-handling)
 18. [Modules](#18-modules)
-19. [Keywords](#19-keywords)
-20. [Error Types](#20-error-types)
+19. [GUI — Forms](#19-gui--forms)
+20. [GUI — Controls](#20-gui--controls)
+21. [GUI — Object Paths](#21-gui--object-paths)
+22. [GUI — Events](#22-gui--events)
+23. [GUI — System Dialogs](#23-gui--system-dialogs)
+24. [GUI — The Form Designer](#24-gui--the-form-designer)
+25. [REST — Credentials](#25-rest--credentials)
+26. [REST — Query Definitions](#26-rest--query-definitions)
+27. [REST — Calling Queries with await](#27-rest--calling-queries-with-await)
+28. [REST — Error Handling with attempt/catch](#28-rest--error-handling-with-attemptcatch)
+29. [REST — Credential Storage](#29-rest--credential-storage)
+30. [Keywords](#30-keywords)
+31. [Error Types](#31-error-types)
 
 ---
 
@@ -63,8 +74,6 @@ define pi as float = 3.14.   # 3.14 → decimal point;  trailing . → terminato
 define x as integer = 5.   # inline comment after terminator
 ```
 
-Comments may appear anywhere except inside a string literal.
-
 ---
 
 ## 4. Identifiers
@@ -74,7 +83,7 @@ Comments may appear anywhere except inside a string literal.
 - Leading underscore `_` is **forbidden**
 - Case-sensitive: `myVar` ≠ `MyVar`
 
-Naming styles all work: `camelCase`, `snake_case`, `PascalCase`, `UPPER_CASE`.
+`rootWindow` is a reserved global identifier — it cannot be redefined or assigned to.
 
 ---
 
@@ -126,7 +135,7 @@ Escape sequences:
 | `\"` | Literal `"` |
 | `\\` | Literal `\` |
 
-Multi-line strings are allowed — the raw newlines are included in the value.
+> **Important:** `\` has no special meaning outside string literals. Inside a string, `\` followed by an unrecognised character is passed through literally. File paths written inside strings (e.g. `"C:\Users\Simon"`) therefore work as expected.
 
 ### Currency
 ```
@@ -137,7 +146,6 @@ Multi-line strings are allowed — the raw newlines are included in the value.
 Always stored and displayed to exactly 2 decimal places.
 
 ### Boolean
-All of the following are accepted:
 
 | True | False |
 |---|---|
@@ -152,6 +160,13 @@ null
 ```
 The value of an uninitialised variable.
 
+### Pixel value (GUI only)
+```
+10px
+200px
+```
+Used exclusively in `position` assignments inside form definitions. Parsed as an unsigned integer.
+
 ---
 
 ## 7. Variables
@@ -162,15 +177,15 @@ define <name> as [constant] [global] <type> [= <expression>].
 ```
 
 ```
-define score       as integer = 100.
-define name        as string  = "Simon".
-define pi          as constant float = 3.14159.
+define score        as integer = 100.
+define name         as string  = "Simon".
+define pi           as constant float = 3.14159.
 define sessionCount as global integer = 0.
 define uninitialised as string.          # value is null
 ```
 
 - `constant` — immutable after declaration; attempting `set` raises a TypeError.
-- `global` — visible everywhere in the program. Global declarations must appear at the top level (outside any function).
+- `global` — visible everywhere in the program. Must appear at the top level.
 - Without an initial value the variable starts as `null`.
 - Re-declaring the same name in the same scope is an error.
 
@@ -184,13 +199,7 @@ set <name>++.                 # increment integer by 1
 set <name>--.                 # decrement integer by 1
 ```
 
-```
-set score = score + 10.
-set i++.
-set i--.
-```
-
-`++` and `--` are only valid on `integer` variables. Assigning a value of the wrong type raises a TypeError unless `cast()` is used.
+For GUI object-path assignment see [§21](#21-gui--object-paths).
 
 ---
 
@@ -219,7 +228,7 @@ set i--.
 | `or` | Logical OR |
 | `not` | Logical NOT (prefix) |
 
-### Null check (special expression form)
+### Null check
 
 ```
 <expr> is null
@@ -236,8 +245,6 @@ set i--.
 6. `and`
 7. `or`
 8. `is null` / `is not null`
-
-Parentheses override precedence in the usual way.
 
 ---
 
@@ -260,12 +267,6 @@ cast(<expression>, <targetType>)
 | any | `string` | Always permitted |
 
 A cast that cannot succeed (e.g. `cast("hello", integer)`) raises a TypeError.
-
-```
-define value as integer = 5.
-define asFloat as float = cast(value, float).
-print string(asFloat) + newline().   # → 5.0
-```
 
 ---
 
@@ -297,26 +298,13 @@ All built-ins are expressions and can appear anywhere a value is expected.
 ```
 print <expression>.
 ```
-Writes the string representation of the expression to stdout. **No newline is appended automatically** — use `newline()` explicitly.
-
-```
-print "Hello, World!" + newline().
-print string(42) + newline().
-```
+Writes the string representation of the expression to stdout. No newline is appended automatically — use `newline()` explicitly.
 
 ### Receive (input)
 ```
 receive <identifier> [with prompt <stringExpression>].
 ```
-Reads one line from stdin into the named variable. The optional `with prompt` clause prints the prompt string before waiting (without a newline). The input is automatically coerced to the variable's declared type; a coercion failure raises TypeError.
-
-```
-define name as string.
-define age  as integer.
-
-receive name with prompt "Enter your name: ".
-receive age  with prompt "Enter your age: ".
-```
+Reads one line from stdin into the named variable. The optional `with prompt` clause prints the prompt string before waiting. The input is automatically coerced to the variable's declared type; a coercion failure raises TypeError.
 
 ---
 
@@ -336,18 +324,6 @@ else -->
 
 Parentheses around the condition are optional. A single `<--` closes the entire chain.
 
-```
-define score as integer = 75.
-
-if (score >= 70) -->
-    print "Distinction" + newline().
-else if (score >= 40) -->
-    print "Pass" + newline().
-else -->
-    print "Fail" + newline().
-<--
-```
-
 ### switch
 
 ```
@@ -359,19 +335,9 @@ switch <expression> -->
 ```
 
 - Cases are tested top-to-bottom; the first match wins (no fall-through).
-- Cases can be **grouped** by stacking them without a body; they share the next body.
-- `else` is the default (required).
+- Cases can be **grouped** (stacked without a body) to share the next body.
+- `else` is the default.
 - Case patterns may be exact values or comparison expressions (`< 18`, `>= 65`, etc.).
-
-```
-switch age -->
-    < 13  : print "Child" + newline().
-    < 18  : print "Teenager" + newline().
-    18    :
-    19    : print "Newly adult (18 or 19)" + newline().
-    else  : print "Adult" + newline().
-<--
-```
 
 ---
 
@@ -385,18 +351,7 @@ for <variable> loops (<start>, <end>, <increment>) -->
 <--
 ```
 
-- The loop variable must be declared as `integer` before the loop.
-- The range is **inclusive** of both start and end.
-- `start`, `end`, and `increment` may be literals or integer expressions.
-
-```
-define i as integer.
-
-for i loops (1, 5, 1) -->
-    print string(i) + newline().
-<--
-# output: 1 2 3 4 5
-```
+The loop variable must be a pre-declared `integer`. The range is **inclusive** of both ends.
 
 ### while
 
@@ -404,16 +359,6 @@ for i loops (1, 5, 1) -->
 while <condition> -->
     <statements>
 <--
-```
-
-```
-define count as integer = 0.
-
-while count < 3 -->
-    set count++.
-    print string(count) + newline().
-<--
-# output: 1 2 3
 ```
 
 ### for each (collection iterator)
@@ -424,15 +369,7 @@ for each <variable> in <collectionExpression> -->
 <--
 ```
 
-- The iteration variable is implicitly declared — do **not** pre-declare it.
-- The collection expression must be a `json` array.
-- Each element is available as a `json` value inside the body.
-
-```
-for each item in data["items"] -->
-    print item["name"] + newline().
-<--
-```
+The iteration variable is implicitly declared. The collection must evaluate to a `json` array.
 
 ---
 
@@ -448,84 +385,49 @@ define <name>(<param> as <type>, ...) returns <type> -->
 
 Use `returns null` for procedures that return no value.
 
-```
-define add(a as integer, b as integer) returns integer -->
-    return a + b.
-<--
+### Rules
 
-define greet(name as string) returns null -->
-    print "Hello, " + name + "!" + newline().
-    return null.
-<--
-```
-
-### Calling
-
-```
-set result = add(3, 4).
-greet("World").
-print string(add(10, 20)) + newline().
-```
-
-- Functions must be declared before they are called (top-down order).
+- Functions must be declared before they are called.
 - Parameters are local and immutable within the body.
 - Variables declared inside a function are local to it.
 - Globals may be read inside a function.
 - Recursion is permitted.
-- A `returns null` function that reaches the end of its body without a `return` statement implicitly returns `null`.
 
 ---
 
 ## 16. Collections (json)
 
-The `json` type is a free-form hierarchical key-value store whose structure mirrors JSON exactly. It can hold objects, arrays, strings, numbers, booleans, and nulls.
+The `json` type is a free-form hierarchical key-value store mirroring JSON exactly.
 
 ### Declaration
 
 ```
 define myData as json = {
-    "retrieved": [
-        { "recordId": 1, "firstName": "Simon", "age": 58 },
-        { "recordId": 2, "firstName": "James", "age": 25 }
-    ]
+    "items": [ "alpha", "beta", "gamma" ]
 }.
 ```
 
 ### Access
 
-Both named-key and positional access are valid:
-
 ```
-myData["retrieved"][0]["firstName"]   # → "Simon"  (string key lookup)
-myData[0][0][0]                       # → "Simon"  (positional: 0-based, key-order)
+myData["items"][0]    # → "alpha"
 ```
 
 ### Mutation
 
 ```
-set myData["newKey"] = "newValue".       # add or update a key
-remove myData["oldKey"].                 # remove a key
-append(myData["retrieved"], newRecord).  # append to an array
+set myData["newKey"] = "newValue".
+remove myData["oldKey"].
+append(myData["items"], "delta").
 ```
 
 ### Building JSON from variables
 
-JSON literal syntax requires literal JSON values — variable references are not permitted inside `{ }`. To build a JSON object whose values come from variables, declare the object with placeholder values and then use `set` to fill them in:
+JSON literal syntax requires literal values — variable references are not permitted inside `{ }`. Build JSON objects by declaring with placeholders and using `set`:
 
 ```
-define name  as string = "Alice".
-define phone as string = "555-0101".
-
-define entry as json = { "name": "PLACEHOLDER", "phone": "PLACEHOLDER" }.
-set entry["name"]  = name.
-set entry["phone"] = phone.
-```
-
-### length()
-
-```
-length(myData)              # number of top-level keys in the object
-length(myData["retrieved"]) # number of elements in the array
+define entry as json = { "name": "PLACEHOLDER" }.
+set entry["name"] = myNameVariable.
 ```
 
 ---
@@ -537,31 +439,15 @@ try -->
     <statements>
 catch (<ErrorType>) -->
     <statements>
-catch (<ErrorType>) -->
-    <statements>
 finally -->
     <statements>
 <--
 ```
 
 - Multiple `catch` clauses are allowed.
-- `finally` is optional; it always runs regardless of whether an error occurred.
+- `finally` is optional; it always runs.
 - A single `<--` closes the entire structure.
-- If no `catch` matches the raised error, the error propagates upward.
-
-```
-try -->
-    receive age with prompt "Enter your age: ".
-    set age = cast(age, integer).
-    print "You are " + string(age) + " years old." + newline().
-catch (TypeError) -->
-    print "Please enter a whole number." + newline().
-catch (RuntimeError) -->
-    print "Something went wrong." + newline().
-finally -->
-    print "Done." + newline().
-<--
-```
+- If no `catch` matches, the error propagates upward.
 
 ---
 
@@ -572,19 +458,512 @@ import "<path>".
 ```
 
 - Must appear at the **top** of the file, before any declarations.
-- The path is relative to the importing file's directory.
-- The `.run` extension is **omitted** in the import statement.
-- All global variables and functions defined in the imported file become available.
-- Circular imports are detected and cause a parse error.
+- The path is relative to the importing file's directory; omit the `.run` extension.
+- All global variables and functions from the imported file become available.
+- Circular imports are detected and cause an error.
+
+---
+
+## 19. GUI — Forms
+
+> GUI programs run with `rundell-gui` rather than `rundell`.
+
+### Form definition
 
 ```
-import "mathUtils".
-import "lib/strings".
+define <name> as form -->
+    <form-level property assignments>
+    <control declarations>
+    <control property assignments>
+<--
+```
+
+### Form-level properties
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `title` | string | `""` | Title-bar text |
+| `width` | pixels | `800px` | Form width |
+| `height` | pixels | `600px` | Form height |
+| `resizable` | boolean | `false` | User can resize |
+| `backgroundcolor` | string (`#RRGGBB`) | `"#A2A2A2"` | Background fill |
+| `textcolor` | string | `"#000000"` | Default text colour |
+| `textbackground` | string | `"#FFFFFF"` | Default text background |
+
+Inside the form body, reference the form itself with `form`:
+
+```
+set form\title  = "My Window".
+set form\width  = 600px.
+set form\height = 400px.
+```
+
+### Showing and closing forms
+
+```
+rootWindow\myForm\show().           # modeless — execution continues
+rootWindow\myForm\show(modal).      # modal — blocks until form is closed
+rootWindow\myForm\close().          # close from a callback
+```
+
+`rootWindow` is the built-in global root. You cannot redefine it.
+
+Modal forms block the interpreter thread until the form is closed (maximum 30 seconds before a timeout warning; the form remains open).
+
+---
+
+## 20. GUI — Controls
+
+### Declaring a control
+
+```
+define <name> as form\<type>.
+```
+
+Control types: `label`, `textbox`, `button`, `radiobutton`, `checkbox`, `switch`, `select`, `listbox`.
+
+### Shared properties
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `position` | `top, left, width, height` | `0px, 0px, 100px, 30px` | Absolute pixel position |
+| `visible` | boolean | `true` | Whether the control is rendered |
+| `enabled` | boolean | `true` | Whether the control accepts input |
+
+#### label
+
+| Property | Type | Default |
+|---|---|---|
+| `value` | string | `""` |
+| `textcolor` | string | `"#000000"` |
+| `font` | string | `"default"` |
+| `fontsize` | integer | `12` |
+
+No events.
+
+#### textbox
+
+| Property | Type | Default |
+|---|---|---|
+| `value` | string | `""` |
+| `textcolor` | string | `"#000000"` |
+| `textbackground` | string | `"#FFFFFF"` |
+| `readonly` | boolean | `false` |
+| `maxlength` | integer | (none) |
+| `placeholder` | string | `""` |
+| `autorefresh` | boolean | `true` |
+
+Events: `change` (fires on each keystroke).
+
+#### button
+
+| Property | Type | Default |
+|---|---|---|
+| `caption` | string | `""` |
+| `textcolor` | string | `"#000000"` |
+| `backgroundcolor` | string | `"#E0E0E0"` |
+
+Events: `click`.
+
+#### radiobutton
+
+| Property | Type | Default |
+|---|---|---|
+| `caption` | string | `""` |
+| `group` | string | `""` |
+| `checked` | boolean | `false` |
+
+Radio buttons sharing the same `group` are mutually exclusive — setting one to `checked = true` automatically clears the others.
+
+Events: `change`.
+
+#### checkbox
+
+| Property | Type | Default |
+|---|---|---|
+| `caption` | string | `""` |
+| `checked` | boolean | `false` |
+
+Events: `change`.
+
+#### switch
+
+Rendered as a toggle button. `checked = true` represents On/Yes.
+
+| Property | Type | Default |
+|---|---|---|
+| `caption` | string | `""` |
+| `checked` | boolean | `false` |
+
+Events: `change`.
+
+#### select
+
+| Property | Type | Default | Notes |
+|---|---|---|---|
+| `items` | json array or csv | `[]` | `["A", "B"]` or `"A, B"` |
+| `value` | string | (none) | The currently selected item text (read) |
+
+Events: `change`.
+
+#### listbox
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `datasource` | json | `null` | Array variable. Rows from `"rows"`, `"records"`, or top-level array. |
+| `columns` | json array | `[]` | Field names to display as columns |
+| `imagecolumn` | string | `""` | Field whose value is a base64-encoded PNG/JPEG |
+| `multiselect` | boolean | `false` | Allow multiple row selection |
+| `value` | json | `null` | Selected record(s) as json (read) |
+| `rowheight` | integer | `24` | Row height in pixels |
+| `headervisible` | boolean | `true` | Show column headers |
+
+Events: `change` (selection changes), `select` (row double-clicked).
+
+---
+
+## 21. GUI — Object Paths
+
+An **object path** navigates the form hierarchy using `\` as a separator:
+
+```
+rootWindow\<formName>\<controlName>\<property>
+```
+
+The leading `rootWindow\` is optional for forms registered in the current program:
+
+```
+myForm\myLabel\value
+rootWindow\myForm\myLabel\value   # equivalent
+```
+
+**Reading** a property (in an expression):
+
+```
+define v as string = myForm\myTextbox\value.
+print myForm\myLabel\value.
+```
+
+**Writing** a property (`set` statement):
+
+```
+set myForm\myLabel\value = "Updated text".
+set myForm\myButton\enabled = false.
+```
+
+Object-path reads always return a `string`. Use `cast()` when a numeric type is needed.
+
+Inside a form definition body, `form` refers to the form being declared:
+
+```
+set form\title = "My Form".
 ```
 
 ---
 
-## 19. Keywords
+## 22. GUI — Events
+
+Bind a control event to a zero-argument function:
+
+```
+set <control>\<event> = <functionName>().
+```
+
+The function must be declared with `returns null` and no parameters:
+
+```
+define handleClick() returns null -->
+    # event handler body
+    return null.
+<--
+```
+
+| Control | Event | Fires when |
+|---|---|---|
+| button | `click` | Clicked |
+| textbox | `change` | Text edited (on each keystroke) |
+| radiobutton | `change` | Checked state changes |
+| checkbox | `change` | Checked state changes |
+| switch | `change` | Toggle state changes |
+| select | `change` | Selection changes |
+| listbox | `change` | Selection changes |
+| listbox | `select` | Row double-clicked |
+
+---
+
+## 23. GUI — System Dialogs
+
+The `dialog` namespace provides native OS dialogs. All calls block the interpreter thread.
+
+### dialog\openfile(title, filter)
+
+Opens a file-open dialog. Returns the selected path as a `string`, or `""` if cancelled.
+
+```
+set path = dialog\openfile("Open File", "Rundell Files (*.run)").
+```
+
+### dialog\savefile(title, filter)
+
+Opens a file-save dialog. Returns the chosen path as a `string`, or `""` if cancelled.
+
+```
+set savePath = dialog\savefile("Save As", "Rundell Files (*.run)").
+```
+
+### dialog\message(title, message, kind)
+
+Displays a modal message box. `kind` is one of `ok`, `okcancel`, `yesno`.
+
+Returns `"ok"`, `"cancel"`, `"yes"`, or `"no"`.
+
+```
+set answer = dialog\message("Confirm", "Delete this record?", yesno).
+if (answer == "yes") --> deleteRecord(). <--
+```
+
+### dialog\colorpicker(initial)
+
+Opens a colour picker. `initial` is a `"#RRGGBB"` string. Returns the chosen colour, or `initial` if cancelled.
+
+```
+set colour = dialog\colorpicker("#FF0000").
+set myForm\myLabel\textcolor = colour.
+```
+
+---
+
+## 24. GUI — The Form Designer
+
+Launch the visual designer with:
+
+```bash
+cargo run -p rundell-gui -- --design
+```
+
+The designer provides:
+
+- **Controls palette** (left panel) — click a control type to place it on the canvas.
+- **Design canvas** (centre) — drag controls to reposition; click to select.
+- **Properties inspector** (right panel) — edit properties for the selected control.
+- **Code panel** (bottom) — click **Generate Code** to produce a Rundell form definition, then **Copy to Clipboard** or **Save to File**.
+
+The generated `.run` file contains a syntactically valid `define ... as form --> ... <--` block.
+
+---
+
+---
+
+## 25. REST — Credentials
+
+A `credentials` definition holds authentication values for one or more REST queries. Values are read at runtime from the encrypted `.rundell.env` file using the `env()` built-in — plain-text secrets must never appear in `.run` source files.
+
+```
+define <name> as credentials -->
+    set <name>\token          = env("<KEY_NAME>").
+    set <name>\authentication = env("<KEY_NAME>").
+<--
+```
+
+Both properties are optional. A credentials block with no properties is valid for public APIs that need no authentication.
+
+| Property | Header sent | Description |
+|---|---|---|
+| `token` | `Authorization: Bearer <value>` | JWT or API bearer token |
+| `authentication` | `X-Rundell-Auth: <value>` | Custom authentication value |
+
+```
+define myCredentials as credentials -->
+    set myCredentials\token          = env("MY_API_TOKEN").
+    set myCredentials\authentication = env("MY_API_SECRET").
+<--
+```
+
+See [§29](#29-rest--credential-storage) for how to store values in `.rundell.env`.
+
+---
+
+## 26. REST — Query Definitions
+
+A `query` definition declares a named, parameterised REST call. It is registered at definition time and executed only when called with `await`.
+
+```
+define <name>(<params>) as query returns json -->
+    set <name>\method      = GET.            # or POST — mandatory
+    set <name>\endpoint    = <expression>.   # mandatory
+    set <name>\credentials = <name>.         # optional
+    set <name>\timeout     = <integer>.      # optional, milliseconds
+    define queryParams as json = { ... }.    # POST only
+<--
+```
+
+- `returns json` is **mandatory**. Omitting it is a parse error.
+- `method` is **mandatory**. Omitting it is a parse error.
+- `endpoint` is **mandatory**. Omitting it is a parse error.
+- `queryParams` is only valid when `method = POST`. Using it with `GET` is a parse error.
+- The default timeout is **10 000 ms**. Override per-query with `set <name>\timeout = <ms>.`
+
+### GET query — no parameters
+
+```
+define getAllUsers() as query returns json -->
+    set getAllUsers\method      = GET.
+    set getAllUsers\endpoint    = "https://api.example.com/users".
+    set getAllUsers\credentials = myCredentials.
+<--
+```
+
+### POST query — with a parameter
+
+```
+define getUser(uid as integer) as query returns json -->
+    set getUser\method      = POST.
+    set getUser\endpoint    = "https://api.example.com/user".
+    set getUser\credentials = myCredentials.
+    define queryParams as json = {
+        "uid": uid
+    }.
+<--
+```
+
+`queryParams` is a reserved identifier inside a query block. It builds the JSON POST body. Variable references (such as `uid` above) are resolved at call time from the query's parameters.
+
+### Public API — no credentials
+
+```
+define getRandomDog() as query returns json -->
+    set getRandomDog\method   = GET.
+    set getRandomDog\endpoint = "https://dog.ceo/api/breeds/image/random".
+<--
+```
+
+---
+
+## 27. REST — Calling Queries with await
+
+Use the `await` keyword to call a query. The call blocks the program until the HTTP response is received (or the timeout expires) and returns the parsed JSON body as a `json` value.
+
+```
+set <variable> = await <queryName>(<args>).
+```
+
+`await` is only valid as the right-hand side of a `set` statement. It is a parse error in any other position.
+
+### Calling a query into a variable
+
+```
+define result as json.
+set result = await getUser(42).
+print result.
+```
+
+### Direct binding to a GUI control
+
+`await` can be the RHS of an object-path assignment, allowing direct binding of a query result to a control property:
+
+```
+set myForm\myListbox\datasource = await getAllUsers().
+```
+
+---
+
+## 28. REST — Error Handling with attempt/catch
+
+The `attempt / catch` construct handles query-related errors without terminating the program.
+
+```
+attempt -->
+    <statements>
+<-- catch <identifier> -->
+    <statements>
+<--
+```
+
+The `catch` block is **mandatory**. The identifier is bound to an error object with these properties:
+
+| Property | Type | Description |
+|---|---|---|
+| `<name>\message` | string | Human-readable error description |
+| `<name>\statusCode` | integer | HTTP status code (`0` if no response received) |
+| `<name>\endpoint` | string | The endpoint URL that was called |
+
+```
+attempt -->
+    define result as json.
+    set result = await getUser(99).
+    print result.
+<-- catch queryError -->
+    print "Error: " + queryError\message + newline().
+    print "Status: " + queryError\statusCode + newline().
+<--
+
+print "Execution continues here after a caught error.".
+```
+
+### What attempt/catch intercepts
+
+`attempt / catch` intercepts only query-related errors:
+
+- Network failure before any response was received
+- HTTP error status codes (4xx, 5xx)
+- Response timeout
+- Response body that is not valid JSON
+- Undefined query name called with `await`
+- Undefined credentials referenced by a query
+- `env()` key not found or decryption failure
+
+**Type errors, division by zero, null errors, and all other runtime errors propagate through `attempt / catch` unaffected.** Use the standard `try / catch` construct for those.
+
+---
+
+## 29. REST — Credential Storage
+
+Credentials are stored encrypted in a `.rundell.env` file in the same directory as the `.run` program. The encryption key is derived from the machine identity — credential files should not be shared or copied between machines.
+
+### CLI commands
+
+Use the `rundell` binary to manage credentials:
+
+```bash
+rundell --env-set KEY_NAME value      # encrypt and store a credential
+rundell --env-list                    # list stored key names (not values)
+rundell --env-delete KEY_NAME         # remove a credential
+```
+
+`--env-set` does not echo the value after storing it. The `.rundell.env` file is always located in the **current working directory** when these commands are run, so run them from the same directory as your `.run` program.
+
+### env() built-in
+
+Inside a credentials block (or anywhere in a program), `env()` reads a decrypted value from the adjacent `.rundell.env` file:
+
+```
+set myCredentials\token = env("MY_API_TOKEN").
+```
+
+`env()` takes a single string argument (the key name). It raises `EnvKeyNotFound` if the key is absent and `EnvDecryptionFailed` if the data is corrupt. Both errors are catchable by `attempt / catch`.
+
+### Complete workflow
+
+```bash
+# 1. Store the credentials (run from your project directory)
+rundell --env-set MY_API_TOKEN eyJhbGciOiJIUzI1NiJ9...
+rundell --env-set MY_API_SECRET s3cr3tv4lu3
+
+# 2. Verify they are stored
+rundell --env-list
+```
+
+```
+# 3. Use them in your program
+define myCredentials as credentials -->
+    set myCredentials\token          = env("MY_API_TOKEN").
+    set myCredentials\authentication = env("MY_API_SECRET").
+<--
+```
+
+---
+
+## 30. Keywords
 
 The following identifiers are reserved and may not be used as variable or function names:
 
@@ -599,12 +978,26 @@ integer  float  string  currency  boolean  json
 cast  length  newline  abs  floor  ceil  round
 substr  upper  lower  trim  append  remove
 returns
-TypeError  NullError  IndexError  DivisionError  IOError  RuntimeError
+
+# GUI keywords
+form  show  close  modal  dialog
+label  textbox  button  radiobutton  checkbox  select  listbox
+autorefresh  datasource  columns
+
+# REST keywords
+query  credentials  await  attempt
+method  endpoint  token  authentication  timeout
+GET  POST  env
+
+# Reserved globals
+rootWindow
 ```
 
 ---
 
-## 20. Error Types
+## 31. Error Types
+
+### Standard errors (caught by try/catch)
 
 | Type | Raised when |
 |---|---|
@@ -613,4 +1006,17 @@ TypeError  NullError  IndexError  DivisionError  IOError  RuntimeError
 | `IndexError` | Collection index out of bounds |
 | `DivisionError` | Division or modulo by zero |
 | `IOError` | Input/output failure |
-| `RuntimeError` | Catch-all for any other runtime error |
+| `RuntimeError` | Catch-all for any other runtime error; also raised on invalid object paths |
+
+### Query errors (caught by attempt/catch)
+
+| Type | Raised when |
+|---|---|
+| `QueryTimeout` | The HTTP request exceeded the timeout duration |
+| `QueryNetworkError` | A network-level failure occurred before any response |
+| `QueryHttpError` | The server responded with a 4xx or 5xx status code |
+| `QueryInvalidJson` | The response body could not be parsed as JSON |
+| `UndefinedQuery` | `await` was called on a name that has no query definition |
+| `UndefinedCredentials` | A query references a credentials name that has not been defined |
+| `EnvKeyNotFound` | `env()` was called but the key is not in `.rundell.env` |
+| `EnvDecryptionFailed` | `env()` found the key but decryption failed (wrong machine or corrupt file) |

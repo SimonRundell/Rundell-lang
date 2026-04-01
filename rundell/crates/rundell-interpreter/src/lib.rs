@@ -6,6 +6,8 @@
 pub mod environment;
 pub mod error;
 pub mod evaluator;
+pub mod form_registry;
+pub mod gui_channel;
 
 pub use error::RuntimeError;
 pub use evaluator::Interpreter;

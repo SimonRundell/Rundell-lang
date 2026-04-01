@@ -5,4 +5,6 @@ members = [
     "crates/rundell-parser",
     "crates/rundell-interpreter",
     "crates/rundell-cli",
+    "crates/rundell-gui",
+    "crates/rundell-env",
 ]

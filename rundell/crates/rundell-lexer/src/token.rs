@@ -14,6 +14,16 @@ fn parse_integer(lex: &mut Lexer<Token>) -> Option<i64> {
     lex.slice().parse().ok()
 }
 
+/// Parse a pixel value literal such as `10px`.
+///
+/// The regex matches the numeric part followed immediately by `px` with no
+/// intervening whitespace.  The `px` suffix is stripped before parsing.
+fn parse_pixel_value(lex: &mut Lexer<Token>) -> Option<u32> {
+    let s = lex.slice();
+    // Strip the trailing "px" (2 chars)
+    s[..s.len() - 2].parse().ok()
+}
+
 /// Parse a float literal (digits, decimal point, digits).
 fn parse_float(lex: &mut Lexer<Token>) -> Option<f64> {
     lex.slice().parse().ok()
@@ -398,6 +408,120 @@ pub enum Token {
     Dot,
 
     // -----------------------------------------------------------------------
+    // GUI — path separator
+    // -----------------------------------------------------------------------
+    /// `\`  Object path separator (outside string literals only).
+    ///
+    /// Logos matches string literals as atomic tokens before reaching the
+    /// top-level scan loop, so `\` inside strings is never tokenised here.
+    #[token("\\")]
+    BackslashSep,
+
+    // -----------------------------------------------------------------------
+    // GUI — pixel dimension literal
+    // -----------------------------------------------------------------------
+    /// A pixel dimension: digits immediately followed by `px`, e.g. `10px`.
+    ///
+    /// Matched as a single token (no whitespace permitted between the number
+    /// and the `px` suffix).  Higher priority than `Integer` so that `10px`
+    /// is not split into `Integer(10)` + identifier `px`.
+    #[regex(r"[0-9]+px", parse_pixel_value, priority = 5)]
+    PixelValue(u32),
+
+    // -----------------------------------------------------------------------
+    // GUI — form and control keywords
+    // -----------------------------------------------------------------------
+    /// `form` keyword
+    #[token("form")]
+    KwForm,
+    /// `show` keyword (method on a form path)
+    #[token("show")]
+    KwShow,
+    /// `close` keyword (method on a form path)
+    #[token("close")]
+    KwClose,
+    /// `modal` argument to `show()`
+    #[token("modal")]
+    KwModal,
+    /// `autorefresh` property keyword
+    #[token("autorefresh")]
+    KwAutorefresh,
+    /// `datasource` property keyword
+    #[token("datasource")]
+    KwDatasource,
+    /// `columns` property keyword
+    #[token("columns")]
+    KwColumns,
+    /// `dialog` built-in namespace keyword
+    #[token("dialog")]
+    KwDialog,
+
+    // -----------------------------------------------------------------------
+    // GUI — control type keywords
+    // -----------------------------------------------------------------------
+    /// `label` control type
+    #[token("label")]
+    KwLabel,
+    /// `textbox` control type
+    #[token("textbox")]
+    KwTextbox,
+    /// `button` control type
+    #[token("button")]
+    KwButton,
+    /// `radiobutton` control type
+    #[token("radiobutton")]
+    KwRadiobutton,
+    /// `checkbox` control type
+    #[token("checkbox")]
+    KwCheckbox,
+    /// `select` control type (dropdown)
+    #[token("select")]
+    KwSelect,
+    /// `listbox` control type
+    #[token("listbox")]
+    KwListbox,
+
+    // -----------------------------------------------------------------------
+    // REST / query keywords
+    // -----------------------------------------------------------------------
+    /// `query` definition type keyword
+    #[token("query")]
+    KwQuery,
+    /// `credentials` definition type keyword
+    #[token("credentials")]
+    KwCredentials,
+    /// `await` async call keyword
+    #[token("await")]
+    KwAwait,
+    /// `attempt` error-handling block opener
+    #[token("attempt")]
+    KwAttempt,
+    /// `method` query property keyword
+    #[token("method")]
+    KwMethod,
+    /// `endpoint` query property keyword
+    #[token("endpoint")]
+    KwEndpoint,
+    /// `token` credentials property keyword
+    #[token("token")]
+    KwToken,
+    /// `authentication` credentials property keyword
+    #[token("authentication")]
+    KwAuthentication,
+    /// `timeout` query property keyword
+    #[token("timeout")]
+    KwTimeout,
+    /// `GET` HTTP method value
+    #[token("GET")]
+    KwGet,
+    /// `POST` HTTP method value
+    #[token("POST")]
+    KwPost,
+    /// `env` built-in function keyword
+    #[token("env")]
+    KwEnv,
+
+    // -----------------------------------------------------------------------
     // Identifier (must come AFTER all keywords)
     // -----------------------------------------------------------------------
     /// A user-defined identifier.
@@ -547,9 +671,43 @@ mod tests {
             ("DivisionError", Token::KwDivisionError),
             ("IOError", Token::KwIOError),
             ("RuntimeError", Token::KwRuntimeError),
+            // REST / query keywords
+            ("query", Token::KwQuery),
+            ("credentials", Token::KwCredentials),
+            ("await", Token::KwAwait),
+            ("attempt", Token::KwAttempt),
+            ("method", Token::KwMethod),
+            ("endpoint", Token::KwEndpoint),
+            ("token", Token::KwToken),
+            ("authentication", Token::KwAuthentication),
+            ("timeout", Token::KwTimeout),
+            ("GET", Token::KwGet),
+            ("POST", Token::KwPost),
+            ("env", Token::KwEnv),
         ];
         for (src, expected) in cases {
             assert_eq!(tokens(src), vec![expected.clone()], "keyword: {src}");
+        }
+    }
+
+    #[test]
+    fn rest_keywords() {
+        let cases: &[(&str, Token)] = &[
+            ("query", Token::KwQuery),
+            ("credentials", Token::KwCredentials),
+            ("await", Token::KwAwait),
+            ("attempt", Token::KwAttempt),
+            ("method", Token::KwMethod),
+            ("endpoint", Token::KwEndpoint),
+            ("token", Token::KwToken),
+            ("authentication", Token::KwAuthentication),
+            ("timeout", Token::KwTimeout),
+            ("GET", Token::KwGet),
+            ("POST", Token::KwPost),
+            ("env", Token::KwEnv),
+        ];
+        for (src, expected) in cases {
+            assert_eq!(tokens(src), vec![expected.clone()], "rest keyword: {src}");
         }
     }
 
@@ -601,5 +759,73 @@ mod tests {
         // We expect exactly 6 tokens: Define, Ident, As, KwFloat, Eq, <num>, Dot
         assert_eq!(toks.len(), 7, "tokens: {:?}", toks);
         assert_eq!(toks[6], Token::Dot);
+    }
+
+    #[test]
+    fn backslash_sep_outside_string() {
+        let toks = tokens(r"rootWindow\myForm\show");
+        assert_eq!(
+            toks,
+            vec![
+                Token::Ident("rootWindow".to_string()),
+                Token::BackslashSep,
+                Token::Ident("myForm".to_string()),
+                Token::BackslashSep,
+                Token::KwShow,
+            ]
+        );
+    }
+
+    #[test]
+    fn backslash_inside_string_is_literal() {
+        // Backslash inside a string is NOT tokenised as BackslashSep.
+        let toks = tokens(r#""C:\Users\Simon""#);
+        // Should produce a single StringLit — the backslashes are literal.
+        assert_eq!(toks.len(), 1, "expected single StringLit, got {:?}", toks);
+        match &toks[0] {
+            Token::StringLit(s) => assert!(s.contains('\\'), "backslash must be in string: {s:?}"),
+            t => panic!("expected StringLit, got {t:?}"),
+        }
+    }
+
+    #[test]
+    fn pixel_value_token() {
+        assert_eq!(tokens("10px"), vec![Token::PixelValue(10)]);
+        assert_eq!(tokens("200px"), vec![Token::PixelValue(200)]);
+    }
+
+    #[test]
+    fn pixel_value_no_space_only() {
+        // "10 px" with a space should NOT be a PixelValue token; it becomes Integer + Ident.
+        let toks = tokens("10 px");
+        // PixelValue regex requires no whitespace, so this becomes Integer(10) + Ident("px")
+        // BUT "px" is now KwLabel... no wait, we don't have a KwPx.
+        // Since px is not a dedicated keyword and the Ident regex matches it:
+        assert_eq!(toks.len(), 2, "tokens: {:?}", toks);
+        assert_eq!(toks[0], Token::Integer(10));
+    }
+
+    #[test]
+    fn gui_keywords() {
+        let cases: &[(&str, Token)] = &[
+            ("form", Token::KwForm),
+            ("show", Token::KwShow),
+            ("close", Token::KwClose),
+            ("modal", Token::KwModal),
+            ("autorefresh", Token::KwAutorefresh),
+            ("datasource", Token::KwDatasource),
+            ("columns", Token::KwColumns),
+            ("dialog", Token::KwDialog),
+            ("label", Token::KwLabel),
+            ("textbox", Token::KwTextbox),
+            ("button", Token::KwButton),
+            ("radiobutton", Token::KwRadiobutton),
+            ("checkbox", Token::KwCheckbox),
+            ("select", Token::KwSelect),
+            ("listbox", Token::KwListbox),
+        ];
+        for (src, expected) in cases {
+            assert_eq!(tokens(src), vec![expected.clone()], "gui keyword: {src}");
+        }
     }
 }

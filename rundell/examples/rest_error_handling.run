@@ -1,0 +1,79 @@
+# rest_error_handling.run
+# Demonstrates attempt/catch for different query failure modes.
+# Uses httpstat.us — a public service that returns whatever status code you ask for.
+# Run with:  rundell rest_error_handling.run
+
+# --- Test 1: HTTP 404 ---
+print "Test 1: HTTP 404" + newline().
+
+define get404() as query returns json -->
+    set get404\method   = GET.
+    set get404\endpoint = "https://httpstat.us/404".
+<--
+
+attempt -->
+    define result as json.
+    set result = await get404().
+    print "Should not reach here." + newline().
+<-- catch err -->
+    print "  Caught — status: " + err\statusCode + newline().
+    print "  Message: "         + err\message    + newline().
+<--
+
+print newline().
+
+# --- Test 2: HTTP 500 ---
+print "Test 2: HTTP 500" + newline().
+
+define get500() as query returns json -->
+    set get500\method   = GET.
+    set get500\endpoint = "https://httpstat.us/500".
+<--
+
+attempt -->
+    define result2 as json.
+    set result2 = await get500().
+    print "Should not reach here." + newline().
+<-- catch err -->
+    print "  Caught — status: " + err\statusCode + newline().
+<--
+
+print newline().
+
+# --- Test 3: timeout ---
+print "Test 3: timeout (2 second limit on a 15-second sleep)" + newline().
+
+define slowEndpoint() as query returns json -->
+    set slowEndpoint\method   = GET.
+    set slowEndpoint\endpoint = "https://httpstat.us/200?sleep=15000".
+    set slowEndpoint\timeout  = 2000.
+<--
+
+attempt -->
+    define result3 as json.
+    set result3 = await slowEndpoint().
+    print "Should not reach here." + newline().
+<-- catch err -->
+    print "  Timed out as expected — status code: " + err\statusCode + newline().
+<--
+
+print newline().
+
+# --- Test 4: successful call after earlier failures ---
+print "Test 4: successful call" + newline().
+
+define getOk() as query returns json -->
+    set getOk\method   = GET.
+    set getOk\endpoint = "https://dog.ceo/api/breeds/image/random".
+<--
+
+attempt -->
+    define dog as json.
+    set dog = await getOk().
+    print "  Success — status: " + dog["status"] + newline().
+<-- catch err -->
+    print "  Unexpected failure: " + err\message + newline().
+<--
+
+print newline().
+print "All tests complete. Program ran to end." + newline().

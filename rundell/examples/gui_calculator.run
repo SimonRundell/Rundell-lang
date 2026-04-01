@@ -1,0 +1,51 @@
+# gui_calculator.run
+# A simple integer calculator with a graphical form.
+# Run with:  rundell-gui gui_calculator.run
+
+define calcForm as form -->
+    set form\title = "Calculator".
+    define numA    as form\textbox.
+    define numB    as form\textbox.
+    define opBox   as form\select.
+    define calcBtn as form\button.
+    define result  as form\label.
+
+    set numA\position    = 10px, 10px, 120px, 28px.
+    set numA\placeholder = "First number".
+
+    set opBox\position   = 140px, 10px, 80px, 28px.
+    set opBox\options    = "+,-,*,/".
+
+    set numB\position    = 230px, 10px, 120px, 28px.
+    set numB\placeholder = "Second number".
+
+    set calcBtn\position = 10px, 50px, 100px, 30px.
+    set calcBtn\caption  = "Calculate".
+    set calcBtn\click    = calculate().
+
+    set result\position  = 10px, 95px, 340px, 28px.
+    set result\value     = "Result will appear here.".
+<--
+
+define calculate() returns null -->
+    define a  as integer = integer(calcForm\numA\value).
+    define b  as integer = integer(calcForm\numB\value).
+    define op as string  = calcForm\opBox\value.
+    define r  as integer = 0.
+
+    try -->
+        switch op -->
+            "+" : set r = a + b.
+            "-" : set r = a - b.
+            "*" : set r = a * b.
+            "/" : set r = a / b.
+            else : set calcForm\result\value = "Unknown operator.".
+        <--
+        set calcForm\result\value = string(a) + " " + op + " " + string(b) + " = " + string(r).
+    catch (DivisionError) -->
+        set calcForm\result\value = "Error: division by zero.".
+    <--
+    return null.
+<--
+
+rootWindow\calcForm\show().
