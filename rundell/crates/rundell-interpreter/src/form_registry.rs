@@ -22,6 +22,33 @@ impl Default for Position {
     }
 }
 
+/// Text alignment for control content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+impl TextAlign {
+    fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "left" => Some(TextAlign::Left),
+            "center" => Some(TextAlign::Center),
+            "right" => Some(TextAlign::Right),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TextAlign::Left => "left",
+            TextAlign::Center => "center",
+            TextAlign::Right => "right",
+        }
+    }
+}
+
 /// Live runtime state for a single control.
 #[derive(Debug, Clone)]
 pub enum ControlState {
@@ -33,6 +60,7 @@ pub enum ControlState {
         text_color: String,
         font: String,
         font_size: u32,
+        text_align: TextAlign,
     },
     Textbox {
         value: String,
@@ -41,6 +69,7 @@ pub enum ControlState {
         position: Position,
         text_color: String,
         text_background: String,
+        text_align: TextAlign,
         readonly: bool,
         max_length: Option<u32>,
         placeholder: String,
@@ -54,6 +83,7 @@ pub enum ControlState {
         position: Position,
         text_color: String,
         background_color: String,
+        text_align: TextAlign,
         on_click: Option<String>,
     },
     Radiobutton {
@@ -63,6 +93,7 @@ pub enum ControlState {
         visible: bool,
         enabled: bool,
         position: Position,
+        text_align: TextAlign,
         on_change: Option<String>,
     },
     Checkbox {
@@ -71,6 +102,7 @@ pub enum ControlState {
         visible: bool,
         enabled: bool,
         position: Position,
+        text_align: TextAlign,
         on_change: Option<String>,
     },
     Switch {
@@ -79,6 +111,7 @@ pub enum ControlState {
         visible: bool,
         enabled: bool,
         position: Position,
+        text_align: TextAlign,
         on_change: Option<String>,
     },
     Select {
@@ -87,6 +120,7 @@ pub enum ControlState {
         visible: bool,
         enabled: bool,
         position: Position,
+        text_align: TextAlign,
         on_change: Option<String>,
     },
     Listbox {
@@ -110,23 +144,37 @@ impl ControlState {
     /// is recognised, or a warning string if it is unrecognised (non-fatal).
     pub fn set_property(&mut self, prop: &str, value: &str) -> Result<(), String> {
         match self {
-            ControlState::Label { value: v, text_color, font, font_size, visible, enabled, .. } => {
+            ControlState::Label { value: v, text_color, font, font_size, text_align, visible, enabled, .. } => {
                 match prop {
                     "value" => *v = value.to_string(),
                     "textcolor" => *text_color = value.to_string(),
                     "font" => *font = value.to_string(),
                     "fontsize" => *font_size = value.parse().unwrap_or(*font_size),
+                    "textalign" => {
+                        *text_align = TextAlign::parse(value)
+                            .ok_or_else(|| format!(
+                                "[WARN] invalid textalign '{}'; use left, center, or right",
+                                value
+                            ))?;
+                    }
                     "visible" => *visible = value == "true",
                     "enabled" => *enabled = value == "true",
                     _ => return Err(format!("[WARN] unrecognised property '{}' on label", prop)),
                 }
             }
             ControlState::Textbox { value: v, text_color, text_background, readonly,
-                max_length, placeholder, autorefresh, on_change, visible, enabled, .. } => {
+                max_length, placeholder, autorefresh, on_change, text_align, visible, enabled, .. } => {
                 match prop {
                     "value" => *v = value.to_string(),
                     "textcolor" => *text_color = value.to_string(),
                     "textbackground" => *text_background = value.to_string(),
+                    "textalign" => {
+                        *text_align = TextAlign::parse(value)
+                            .ok_or_else(|| format!(
+                                "[WARN] invalid textalign '{}'; use left, center, or right",
+                                value
+                            ))?;
+                    }
                     "readonly" => *readonly = value == "true",
                     "maxlength" => *max_length = value.parse().ok(),
                     "placeholder" => *placeholder = value.to_string(),
@@ -137,49 +185,77 @@ impl ControlState {
                     _ => return Err(format!("[WARN] unrecognised property '{}' on textbox", prop)),
                 }
             }
-            ControlState::Button { caption, text_color, background_color, on_click, visible, enabled, .. } => {
+            ControlState::Button { caption, text_color, background_color, text_align, on_click, visible, enabled, .. } => {
                 match prop {
                     "caption" => *caption = value.to_string(),
                     "textcolor" => *text_color = value.to_string(),
                     "backgroundcolor" => *background_color = value.to_string(),
+                    "textalign" => {
+                        *text_align = TextAlign::parse(value)
+                            .ok_or_else(|| format!(
+                                "[WARN] invalid textalign '{}'; use left, center, or right",
+                                value
+                            ))?;
+                    }
                     "click" => *on_click = Some(value.to_string()),
                     "visible" => *visible = value == "true",
                     "enabled" => *enabled = value == "true",
                     _ => return Err(format!("[WARN] unrecognised property '{}' on button", prop)),
                 }
             }
-            ControlState::Radiobutton { caption, group, checked, on_change, visible, enabled, .. } => {
+            ControlState::Radiobutton { caption, group, checked, on_change, text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => *caption = value.to_string(),
                     "group" => *group = value.to_string(),
                     "checked" => *checked = value == "true",
+                    "textalign" => {
+                        *text_align = TextAlign::parse(value)
+                            .ok_or_else(|| format!(
+                                "[WARN] invalid textalign '{}'; use left, center, or right",
+                                value
+                            ))?;
+                    }
                     "change" => *on_change = Some(value.to_string()),
                     "visible" => *visible = value == "true",
                     "enabled" => *enabled = value == "true",
                     _ => return Err(format!("[WARN] unrecognised property '{}' on radiobutton", prop)),
                 }
             }
-            ControlState::Checkbox { caption, checked, on_change, visible, enabled, .. } => {
+            ControlState::Checkbox { caption, checked, on_change, text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => *caption = value.to_string(),
                     "checked" => *checked = value == "true",
+                    "textalign" => {
+                        *text_align = TextAlign::parse(value)
+                            .ok_or_else(|| format!(
+                                "[WARN] invalid textalign '{}'; use left, center, or right",
+                                value
+                            ))?;
+                    }
                     "change" => *on_change = Some(value.to_string()),
                     "visible" => *visible = value == "true",
                     "enabled" => *enabled = value == "true",
                     _ => return Err(format!("[WARN] unrecognised property '{}' on checkbox", prop)),
                 }
             }
-            ControlState::Switch { caption, checked, on_change, visible, enabled, .. } => {
+            ControlState::Switch { caption, checked, on_change, text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => *caption = value.to_string(),
                     "checked" => *checked = value == "true",
+                    "textalign" => {
+                        *text_align = TextAlign::parse(value)
+                            .ok_or_else(|| format!(
+                                "[WARN] invalid textalign '{}'; use left, center, or right",
+                                value
+                            ))?;
+                    }
                     "change" => *on_change = Some(value.to_string()),
                     "visible" => *visible = value == "true",
                     "enabled" => *enabled = value == "true",
                     _ => return Err(format!("[WARN] unrecognised property '{}' on switch", prop)),
                 }
             }
-            ControlState::Select { items, selected_index, on_change, visible, enabled, .. } => {
+            ControlState::Select { items, selected_index, on_change, text_align, visible, enabled, .. } => {
                 match prop {
                     "items" => {
                         // Try to parse as JSON array; fall back to csv
@@ -193,6 +269,13 @@ impl ControlState {
                     }
                     "value" => {
                         *selected_index = items.iter().position(|s| s == value);
+                    }
+                    "textalign" => {
+                        *text_align = TextAlign::parse(value)
+                            .ok_or_else(|| format!(
+                                "[WARN] invalid textalign '{}'; use left, center, or right",
+                                value
+                            ))?;
                     }
                     "change" => *on_change = Some(value.to_string()),
                     "visible" => *visible = value == "true",
@@ -249,23 +332,25 @@ impl ControlState {
     /// Get the string value of a property. Returns None if unrecognised.
     pub fn get_property(&self, prop: &str) -> Option<String> {
         match self {
-            ControlState::Label { value, text_color, font, font_size, visible, enabled, .. } => {
+            ControlState::Label { value, text_color, font, font_size, text_align, visible, enabled, .. } => {
                 match prop {
                     "value" => Some(value.clone()),
                     "textcolor" => Some(text_color.clone()),
                     "font" => Some(font.clone()),
                     "fontsize" => Some(font_size.to_string()),
+                    "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
                     _ => None,
                 }
             }
             ControlState::Textbox { value, text_color, text_background, readonly,
-                max_length, placeholder, autorefresh, visible, enabled, .. } => {
+                max_length, placeholder, autorefresh, text_align, visible, enabled, .. } => {
                 match prop {
                     "value" => Some(value.clone()),
                     "textcolor" => Some(text_color.clone()),
                     "textbackground" => Some(text_background.clone()),
+                    "textalign" => Some(text_align.as_str().to_string()),
                     "readonly" => Some(readonly.to_string()),
                     "maxlength" => max_length.map(|n| n.to_string()),
                     "placeholder" => Some(placeholder.clone()),
@@ -275,47 +360,52 @@ impl ControlState {
                     _ => None,
                 }
             }
-            ControlState::Button { caption, text_color, background_color, visible, enabled, .. } => {
+            ControlState::Button { caption, text_color, background_color, text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => Some(caption.clone()),
                     "textcolor" => Some(text_color.clone()),
                     "backgroundcolor" => Some(background_color.clone()),
+                    "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
                     _ => None,
                 }
             }
-            ControlState::Radiobutton { caption, group, checked, visible, enabled, .. } => {
+            ControlState::Radiobutton { caption, group, checked, text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => Some(caption.clone()),
                     "group" => Some(group.clone()),
                     "checked" => Some(checked.to_string()),
+                    "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
                     _ => None,
                 }
             }
-            ControlState::Checkbox { caption, checked, visible, enabled, .. } => {
+            ControlState::Checkbox { caption, checked, text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => Some(caption.clone()),
                     "checked" => Some(checked.to_string()),
+                    "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
                     _ => None,
                 }
             }
-            ControlState::Switch { caption, checked, visible, enabled, .. } => {
+            ControlState::Switch { caption, checked, text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => Some(caption.clone()),
                     "checked" => Some(checked.to_string()),
+                    "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
                     _ => None,
                 }
             }
-            ControlState::Select { items, selected_index, visible, enabled, .. } => {
+            ControlState::Select { items, selected_index, text_align, visible, enabled, .. } => {
                 match prop {
                     "value" => selected_index.and_then(|i| items.get(i)).cloned(),
+                    "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
                     _ => None,
@@ -376,6 +466,7 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             text_color: "#000000".to_string(),
             font: "default".to_string(),
             font_size: 12,
+            text_align: TextAlign::Left,
         },
         ControlType::Textbox => ControlState::Textbox {
             value: String::new(),
@@ -384,6 +475,7 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             position: Position::default(),
             text_color: "#000000".to_string(),
             text_background: "#FFFFFF".to_string(),
+            text_align: TextAlign::Left,
             readonly: false,
             max_length: None,
             placeholder: String::new(),
@@ -397,6 +489,7 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             position: Position::default(),
             text_color: "#000000".to_string(),
             background_color: "#E0E0E0".to_string(),
+            text_align: TextAlign::Center,
             on_click: None,
         },
         ControlType::Radiobutton => ControlState::Radiobutton {
@@ -406,6 +499,7 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             visible: true,
             enabled: true,
             position: Position::default(),
+            text_align: TextAlign::Left,
             on_change: None,
         },
         ControlType::Checkbox => ControlState::Checkbox {
@@ -414,6 +508,7 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             visible: true,
             enabled: true,
             position: Position::default(),
+            text_align: TextAlign::Left,
             on_change: None,
         },
         ControlType::Switch => ControlState::Switch {
@@ -422,6 +517,7 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             visible: true,
             enabled: true,
             position: Position::default(),
+            text_align: TextAlign::Left,
             on_change: None,
         },
         ControlType::Select => ControlState::Select {
@@ -430,6 +526,7 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             visible: true,
             enabled: true,
             position: Position::default(),
+            text_align: TextAlign::Left,
             on_change: None,
         },
         ControlType::Listbox => ControlState::Listbox {

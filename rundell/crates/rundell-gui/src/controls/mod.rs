@@ -7,7 +7,7 @@ use egui::{Context, Ui};
 
 use rundell_interpreter::form_registry::ControlState;
 
-use crate::form_runtime::EventTuple;
+use crate::form_runtime::GuiEvent;
 
 mod label;
 mod textbox;
@@ -24,62 +24,62 @@ pub fn render_control(
     ctx: &Context,
     form_name: &str,
     ctrl_name: &str,
-    state: &ControlState,
-) -> Vec<EventTuple> {
+    state: &mut ControlState,
+) -> Vec<GuiEvent> {
     match state {
-        ControlState::Label { visible, position, value, text_color, font_size, .. } => {
+        ControlState::Label { visible, position, value, text_color, font_size, text_align, .. } => {
             if *visible {
-                label::render(ui, ctx, form_name, ctrl_name, position, value, text_color, *font_size)
+                label::render(ui, ctx, form_name, ctrl_name, position, value, text_color, *font_size, *text_align)
             } else {
                 vec![]
             }
         }
         ControlState::Textbox { visible, position, value, text_color, text_background,
-            readonly, placeholder, .. } => {
+            readonly, placeholder, text_align, .. } => {
             if *visible {
                 textbox::render(ui, ctx, form_name, ctrl_name, position, value,
-                    text_color, text_background, *readonly, placeholder)
+                    text_color, text_background, *readonly, placeholder, *text_align)
             } else {
                 vec![]
             }
         }
         ControlState::Button { visible, enabled, position, caption, text_color,
-            background_color, .. } => {
+            background_color, text_align, .. } => {
             if *visible {
                 button::render(ui, ctx, form_name, ctrl_name, position, caption,
-                    text_color, background_color, *enabled)
+                    text_color, background_color, *enabled, *text_align)
             } else {
                 vec![]
             }
         }
-        ControlState::Radiobutton { visible, enabled, position, caption, checked, .. } => {
+        ControlState::Radiobutton { visible, enabled, position, caption, checked, text_align, .. } => {
             if *visible {
                 radiobutton::render(ui, ctx, form_name, ctrl_name, position, caption,
-                    *checked, *enabled)
+                    checked, *enabled, *text_align)
             } else {
                 vec![]
             }
         }
-        ControlState::Checkbox { visible, enabled, position, caption, checked, .. } => {
+        ControlState::Checkbox { visible, enabled, position, caption, checked, text_align, .. } => {
             if *visible {
                 checkbox::render(ui, ctx, form_name, ctrl_name, position, caption,
-                    *checked, *enabled)
+                    checked, *enabled, *text_align)
             } else {
                 vec![]
             }
         }
-        ControlState::Switch { visible, enabled, position, caption, checked, .. } => {
+        ControlState::Switch { visible, enabled, position, caption, checked, text_align, .. } => {
             if *visible {
                 switch::render(ui, ctx, form_name, ctrl_name, position, caption,
-                    *checked, *enabled)
+                    checked, *enabled, *text_align)
             } else {
                 vec![]
             }
         }
-        ControlState::Select { visible, enabled, position, items, selected_index, .. } => {
+        ControlState::Select { visible, enabled, position, items, selected_index, text_align, .. } => {
             if *visible {
                 select::render(ui, ctx, form_name, ctrl_name, position, items,
-                    *selected_index, *enabled)
+                    selected_index, *enabled, *text_align)
             } else {
                 vec![]
             }

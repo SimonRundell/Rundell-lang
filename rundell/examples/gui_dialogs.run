@@ -1,31 +1,29 @@
-# gui_dialogs.run
-# Demonstrates the built-in system dialogs: message box, file open, file save.
-# Run with:  rundell-gui gui_dialogs.run
 
 define dlgForm as form -->
-    set form\title = "System Dialogs Demo".
-
-    define msgBtn   as form\button.
-    define openBtn  as form\button.
-    define saveBtn  as form\button.
+    set form\title = "dlgForm".
+    set form\width = 760px.
+    set form\height = 520px.
+    set form\resizable = true.
+    set form\backgroundcolor = "#F2F2F2".
+    set form\textcolor = "#202020".
+    set form\textbackground = "#FFFFFF".
+    define msgBtn as form\button.
+    set msgBtn\position = 10px, 10px, 180px, 30px.
+    set msgBtn\caption = "Show Message Box".
+    set msgBtn\click = showMessage().
+    define openBtn as form\button.
+    set openBtn\position = 55px, 10px, 180px, 30px.
+    set openBtn\caption = "Open File Dialog".
+    set openBtn\click = openFile().
+    define saveBtn as form\button.
+    set saveBtn\position = 100px, 10px, 180px, 30px.
+    set saveBtn\caption = "Save File Dialog".
+    set saveBtn\click = saveFile().
     define resultLbl as form\label.
-
-    set msgBtn\position    = 10px, 10px, 180px, 30px.
-    set msgBtn\caption     = "Show Message Box".
-    set msgBtn\click       = showMessage().
-
-    set openBtn\position   = 10px, 55px, 180px, 30px.
-    set openBtn\caption    = "Open File Dialog".
-    set openBtn\click      = openFile().
-
-    set saveBtn\position   = 10px, 100px, 180px, 30px.
-    set saveBtn\caption    = "Save File Dialog".
-    set saveBtn\click      = saveFile().
-
-    set resultLbl\position = 10px, 145px, 400px, 28px.
-    set resultLbl\value    = "Result will appear here.".
+    set resultLbl\position = 145px, 10px, 400px, 28px.
+    set resultLbl\value = "Result will appear here.".
 <--
-
+ 
 define showMessage() returns null -->
     define ans as string = dialog\message("Confirm", "Do you like Rundell?", yesno).
     set dlgForm\resultLbl\value = "You answered: " + ans.

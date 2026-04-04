@@ -1,0 +1,12 @@
+define rows as json = [].
+append(rows, { "name": "Ada", "age": 36 }).
+append(rows, { "name": "Linus", "age": 55 }).
+
+write_csv("people.csv", rows, true).
+
+define loaded as json = read_csv("people.csv", true).
+print loaded[0]["name"] + newline().
+
+# Read the file again without headers (first row will be the header values).
+define rawRows as json = read_csv("people.csv", false).
+print rawRows[1][0] + newline().

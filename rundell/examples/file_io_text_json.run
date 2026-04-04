@@ -1,0 +1,11 @@
+define textPath as string = "sample.txt".
+write_text(textPath, "Hello from Rundell." + newline() + "Second line.").
+
+define contents as string = read_text(textPath).
+print contents + newline().
+
+define data as json = { "name": "Ada", "active": true, "score": 98 }.
+write_json("sample.json", data).
+
+define loaded as json = read_json("sample.json").
+print loaded["name"] + " (" + string(loaded["score"]) + ")" + newline().

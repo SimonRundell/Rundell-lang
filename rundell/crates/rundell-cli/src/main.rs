@@ -16,6 +16,7 @@ use rustyline::DefaultEditor;
 
 use rundell_interpreter::Interpreter;
 use rundell_parser::{format_parse_error, parse};
+use rundell_parser::ast::{Expr, SetOp, Stmt};
 
 /// The Rundell language interpreter.
 #[derive(ClapParser, Debug)]
@@ -123,6 +124,11 @@ fn run_file(path: PathBuf) {
         }
     };
 
+    if uses_gui(&stmts) {
+        rundell_gui::run_program(path);
+        return;
+    }
+
     let mut interpreter = Interpreter::new();
     // Set the source directory so imports are resolved relative to the file.
     if let Some(dir) = path.parent() {
@@ -134,6 +140,85 @@ fn run_file(path: PathBuf) {
     if let Err(e) = interpreter.run(stmts) {
         eprintln!("Runtime error: {e}");
         process::exit(1);
+    }
+}
+
+fn uses_gui(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(stmt_uses_gui)
+}
+
+fn stmt_uses_gui(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::FormDef(_) => true,
+        Stmt::ExprStmt(expr) => expr_uses_gui(expr),
+        Stmt::Define(def) => def.init.as_ref().map(expr_uses_gui).unwrap_or(false),
+        Stmt::Set(set_stmt) => match &set_stmt.op {
+            SetOp::Assign(expr) => expr_uses_gui(expr),
+            _ => false,
+        },
+        Stmt::Print(expr) => expr_uses_gui(expr),
+        Stmt::Receive(_) => false,
+        Stmt::If(i) => {
+            expr_uses_gui(&i.condition)
+                || i.then_body.iter().any(stmt_uses_gui)
+                || i.else_ifs.iter().any(|(cond, body)| {
+                    expr_uses_gui(cond) || body.iter().any(stmt_uses_gui)
+                })
+                || i.else_body.as_ref().map(|b| b.iter().any(stmt_uses_gui)).unwrap_or(false)
+        }
+        Stmt::Switch(sw) => {
+            expr_uses_gui(&sw.subject)
+                || sw.cases.iter().any(|case| case.body.iter().any(stmt_uses_gui))
+        }
+        Stmt::ForLoop(fl) => {
+            expr_uses_gui(&fl.start)
+                || expr_uses_gui(&fl.end)
+                || expr_uses_gui(&fl.increment)
+                || fl.body.iter().any(stmt_uses_gui)
+        }
+        Stmt::WhileLoop(wl) => {
+            expr_uses_gui(&wl.condition) || wl.body.iter().any(stmt_uses_gui)
+        }
+        Stmt::ForEach(fe) => {
+            expr_uses_gui(&fe.collection) || fe.body.iter().any(stmt_uses_gui)
+        }
+        Stmt::FunctionDef(fd) => fd.body.iter().any(stmt_uses_gui),
+        Stmt::Return(expr) => expr.as_ref().map(expr_uses_gui).unwrap_or(false),
+        Stmt::TryCatch(tc) => {
+            tc.try_body.iter().any(stmt_uses_gui)
+                || tc.catches.iter().any(|c| c.body.iter().any(stmt_uses_gui))
+                || tc.finally_body.as_ref().map(|b| b.iter().any(stmt_uses_gui)).unwrap_or(false)
+        }
+        Stmt::Remove(expr) => expr_uses_gui(expr),
+        Stmt::Append(expr, val) => expr_uses_gui(expr) || expr_uses_gui(val),
+        Stmt::DefineControl(_, _) => true,
+        Stmt::CredentialsDef(def) => {
+            def.token.as_ref().map(expr_uses_gui).unwrap_or(false)
+                || def.authentication.as_ref().map(expr_uses_gui).unwrap_or(false)
+        }
+        Stmt::QueryDef(def) => {
+            expr_uses_gui(&def.endpoint)
+                || def.timeout_ms.as_ref().map(expr_uses_gui).unwrap_or(false)
+                || def.query_params.as_ref().map(expr_uses_gui).unwrap_or(false)
+        }
+        Stmt::Attempt(block) => {
+            block.body.iter().any(stmt_uses_gui) || block.handler.iter().any(stmt_uses_gui)
+        }
+        Stmt::Import(_) => false,
+    }
+}
+
+fn expr_uses_gui(expr: &Expr) -> bool {
+    match expr {
+        Expr::Dialog(_) => true,
+        Expr::ShowForm { .. } | Expr::CloseForm { .. } => true,
+        Expr::BinaryOp(lhs, _, rhs) => expr_uses_gui(lhs) || expr_uses_gui(rhs),
+        Expr::UnaryOp(_, inner) => expr_uses_gui(inner),
+        Expr::Index(target, idx) => expr_uses_gui(target) || expr_uses_gui(idx),
+        Expr::Call(_, args) => args.iter().any(expr_uses_gui),
+        Expr::IsNull(inner) | Expr::IsNotNull(inner) => expr_uses_gui(inner),
+        Expr::Await(await_expr) => expr_uses_gui(await_expr.call.as_ref()),
+        _ => false,
     }
 }
 

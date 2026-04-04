@@ -2,13 +2,13 @@
 
 use egui::{Context, ScrollArea, Ui, pos2, vec2};
 use rundell_interpreter::form_registry::Position;
-use crate::form_runtime::EventTuple;
+use crate::form_runtime::GuiEvent;
 
 /// Render a listbox. Fires `"change"` on selection change, `"select"` on
 /// double-click.
 #[allow(clippy::too_many_arguments)]
 pub fn render(
-    _ui: &mut Ui,
+    ui: &mut Ui,
     ctx: &Context,
     form_name: &str,
     ctrl_name: &str,
@@ -19,11 +19,12 @@ pub fn render(
     multi_select: bool,
     row_height: u32,
     header_visible: bool,
-    selected_indices: &[usize],
+    selected_indices: &mut Vec<usize>,
     enabled: bool,
-) -> Vec<EventTuple> {
+) -> Vec<GuiEvent> {
     let id = egui::Id::new(format!("{form_name}_{ctrl_name}"));
     let mut events = Vec::new();
+    let origin = ui.available_rect_before_wrap().min;
 
     // Suppress unused variable warnings for parameters used only for future features
     let _ = multi_select;
@@ -42,7 +43,7 @@ pub fn render(
         .unwrap_or_default();
 
     egui::Area::new(id)
-        .fixed_pos(pos2(position.left as f32, position.top as f32))
+        .fixed_pos(pos2(origin.x + position.left as f32, origin.y + position.top as f32))
         .show(ctx, |ui| {
             ui.set_min_size(vec2(position.width as f32, position.height as f32));
             ui.add_enabled_ui(enabled, |ui| {
@@ -94,18 +95,22 @@ pub fn render(
 
                                         let resp = ui.selectable_label(is_selected, &row_text);
                                         if resp.clicked() {
-                                            events.push((
-                                                form_name.to_string(),
-                                                ctrl_name.to_string(),
-                                                "change".to_string(),
-                                            ));
+                                            selected_indices.clear();
+                                            selected_indices.push(row_idx);
+                                            events.push(GuiEvent {
+                                                form: form_name.to_string(),
+                                                control: ctrl_name.to_string(),
+                                                event: "change".to_string(),
+                                                value: None,
+                                            });
                                         }
                                         if resp.double_clicked() {
-                                            events.push((
-                                                form_name.to_string(),
-                                                ctrl_name.to_string(),
-                                                "select".to_string(),
-                                            ));
+                                            events.push(GuiEvent {
+                                                form: form_name.to_string(),
+                                                control: ctrl_name.to_string(),
+                                                event: "select".to_string(),
+                                                value: None,
+                                            });
                                         }
                                     });
                                 }

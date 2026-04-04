@@ -173,6 +173,8 @@ pub struct Interpreter {
     pub(crate) current_form_name: Option<String>,
     /// Path to the running .run source file (needed to locate .rundell.env).
     pub program_path: Option<PathBuf>,
+    /// Monotonic dialog request counter.
+    dialog_seq: u64,
     /// Tokio async runtime for executing HTTP requests.
     pub rt: tokio::runtime::Runtime,
     /// Registry of query definitions.
@@ -202,6 +204,7 @@ impl Interpreter {
             gui_rx: None,
             current_form_name: None,
             program_path: None,
+            dialog_seq: 0,
             rt: tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime"),
             query_registry: QueryRegistry::default(),
             credentials_registry: CredentialsRegistry::default(),
@@ -222,6 +225,7 @@ impl Interpreter {
             gui_rx: None,
             current_form_name: None,
             program_path: None,
+            dialog_seq: 0,
             rt: tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime"),
             query_registry: QueryRegistry::default(),
             credentials_registry: CredentialsRegistry::default(),
@@ -245,6 +249,7 @@ impl Interpreter {
         for stmt in stmts {
             self.exec_stmt(stmt)?;
         }
+        self.wait_for_open_forms()?;
         Ok(())
     }
 
@@ -254,7 +259,7 @@ impl Interpreter {
 
     /// Execute a single statement.
     fn exec_stmt(&mut self, stmt: Stmt) -> Result<(), RuntimeError> {
-        match stmt {
+        let result = match stmt {
             Stmt::Import(path) => self.exec_import(&path),
             Stmt::Define(d) => self.exec_define(d),
             Stmt::Set(s) => self.exec_set(s),
@@ -321,7 +326,12 @@ impl Interpreter {
                 Ok(())
             }
             Stmt::Attempt(block) => self.exec_attempt(block),
+        };
+
+        if result.is_ok() {
+            self.pump_gui_events()?;
         }
+        result
     }
 
     // Import a module.
@@ -1314,6 +1324,222 @@ impl Interpreter {
                     })
             }
 
+            "read_text" => {
+                let v = self.eval_args(args, 1)?;
+                let path = self.expect_string_arg(&v[0], "read_text", "path")?;
+                let path = self.resolve_io_path(&path)?;
+                let contents = std::fs::read_to_string(&path)
+                    .map_err(|e| RuntimeError::IOError(format!(
+                        "read_text() failed for '{}': {e}",
+                        path.display()
+                    )))?;
+                Ok(Value::Str(contents))
+            }
+
+            "write_text" => {
+                let v = self.eval_args(args, 2)?;
+                let path = self.expect_string_arg(&v[0], "write_text", "path")?;
+                let contents = self.expect_string_arg(&v[1], "write_text", "content")?;
+                let path = self.resolve_io_path(&path)?;
+                std::fs::write(&path, contents.as_bytes())
+                    .map_err(|e| RuntimeError::IOError(format!(
+                        "write_text() failed for '{}': {e}",
+                        path.display()
+                    )))?;
+                Ok(Value::Null)
+            }
+
+            "read_json" => {
+                let v = self.eval_args(args, 1)?;
+                let path = self.expect_string_arg(&v[0], "read_json", "path")?;
+                let path = self.resolve_io_path(&path)?;
+                let contents = std::fs::read_to_string(&path)
+                    .map_err(|e| RuntimeError::IOError(format!(
+                        "read_json() failed for '{}': {e}",
+                        path.display()
+                    )))?;
+                let json_val = serde_json::from_str(&contents).map_err(|e| {
+                    RuntimeError::RuntimeError(format!(
+                        "read_json() failed to parse JSON in '{}': {e}",
+                        path.display()
+                    ))
+                })?;
+                Ok(Value::Json(json_val))
+            }
+
+            "write_json" => {
+                let v = self.eval_args(args, 2)?;
+                let path = self.expect_string_arg(&v[0], "write_json", "path")?;
+                let json_val = match &v[1] {
+                    Value::Json(value) => value.clone(),
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "write_json() value must be json".to_string(),
+                        ))
+                    }
+                };
+                let path = self.resolve_io_path(&path)?;
+                let contents = serde_json::to_string_pretty(&json_val).map_err(|e| {
+                    RuntimeError::RuntimeError(format!("write_json() failed: {e}"))
+                })?;
+                std::fs::write(&path, contents.as_bytes())
+                    .map_err(|e| RuntimeError::IOError(format!(
+                        "write_json() failed for '{}': {e}",
+                        path.display()
+                    )))?;
+                Ok(Value::Null)
+            }
+
+            "read_csv" => {
+                let v = self.eval_args(args, 2)?;
+                let path = self.expect_string_arg(&v[0], "read_csv", "path")?;
+                let has_headers = self.expect_boolean_arg(&v[1], "read_csv", "has_headers")?;
+                let path = self.resolve_io_path(&path)?;
+                let mut reader = csv::ReaderBuilder::new()
+                    .has_headers(has_headers)
+                    .from_path(&path)
+                    .map_err(|e| RuntimeError::IOError(format!(
+                        "read_csv() failed for '{}': {e}",
+                        path.display()
+                    )))?;
+
+                let mut rows = Vec::new();
+                if has_headers {
+                    let headers = reader
+                        .headers()
+                        .map_err(|e| RuntimeError::IOError(format!(
+                            "read_csv() failed for '{}': {e}",
+                            path.display()
+                        )))?
+                        .clone();
+                    for record in reader.records() {
+                        let record = record.map_err(|e| RuntimeError::IOError(format!(
+                            "read_csv() failed for '{}': {e}",
+                            path.display()
+                        )))?;
+                        let mut obj = serde_json::Map::new();
+                        for (idx, header) in headers.iter().enumerate() {
+                            let value = record.get(idx).unwrap_or("");
+                            obj.insert(
+                                header.to_string(),
+                                serde_json::Value::String(value.to_string()),
+                            );
+                        }
+                        rows.push(serde_json::Value::Object(obj));
+                    }
+                } else {
+                    for record in reader.records() {
+                        let record = record.map_err(|e| RuntimeError::IOError(format!(
+                            "read_csv() failed for '{}': {e}",
+                            path.display()
+                        )))?;
+                        let arr = record
+                            .iter()
+                            .map(|value| serde_json::Value::String(value.to_string()))
+                            .collect();
+                        rows.push(serde_json::Value::Array(arr));
+                    }
+                }
+                Ok(Value::Json(serde_json::Value::Array(rows)))
+            }
+
+            "write_csv" => {
+                let v = self.eval_args(args, 3)?;
+                let path = self.expect_string_arg(&v[0], "write_csv", "path")?;
+                let include_headers =
+                    self.expect_boolean_arg(&v[2], "write_csv", "include_headers")?;
+                let rows = match &v[1] {
+                    Value::Json(serde_json::Value::Array(arr)) => arr.clone(),
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "write_csv() rows must be a json array".to_string(),
+                        ))
+                    }
+                };
+                let path = self.resolve_io_path(&path)?;
+                let mut writer = csv::WriterBuilder::new()
+                    .has_headers(include_headers)
+                    .from_path(&path)
+                    .map_err(|e| RuntimeError::IOError(format!(
+                        "write_csv() failed for '{}': {e}",
+                        path.display()
+                    )))?;
+
+                if include_headers {
+                    let first = rows.first().ok_or_else(|| RuntimeError::TypeError(
+                        "write_csv() rows must contain at least one object when include_headers is true"
+                            .to_string(),
+                    ))?;
+                    let first_obj = match first {
+                        serde_json::Value::Object(obj) => obj,
+                        _ => {
+                            return Err(RuntimeError::TypeError(
+                                "write_csv() rows must be objects when include_headers is true"
+                                    .to_string(),
+                            ))
+                        }
+                    };
+                    let headers: Vec<String> = first_obj.keys().cloned().collect();
+                    writer
+                        .write_record(headers.iter())
+                        .map_err(|e| RuntimeError::IOError(format!(
+                            "write_csv() failed for '{}': {e}",
+                            path.display()
+                        )))?;
+
+                    for row in rows {
+                        let obj = match row {
+                            serde_json::Value::Object(obj) => obj,
+                            _ => {
+                                return Err(RuntimeError::TypeError(
+                                    "write_csv() rows must be objects when include_headers is true"
+                                        .to_string(),
+                                ))
+                            }
+                        };
+                        let record: Vec<String> = headers
+                            .iter()
+                            .map(|key| {
+                                obj.get(key)
+                                    .map(json_value_to_csv)
+                                    .unwrap_or_else(String::new)
+                            })
+                            .collect();
+                        writer
+                            .write_record(record.iter())
+                            .map_err(|e| RuntimeError::IOError(format!(
+                                "write_csv() failed for '{}': {e}",
+                                path.display()
+                            )))?;
+                    }
+                } else {
+                    for row in rows {
+                        let arr = match row {
+                            serde_json::Value::Array(arr) => arr,
+                            _ => {
+                                return Err(RuntimeError::TypeError(
+                                    "write_csv() rows must be arrays when include_headers is false"
+                                        .to_string(),
+                                ))
+                            }
+                        };
+                        let record: Vec<String> =
+                            arr.iter().map(json_value_to_csv).collect();
+                        writer
+                            .write_record(record.iter())
+                            .map_err(|e| RuntimeError::IOError(format!(
+                                "write_csv() failed for '{}': {e}",
+                                path.display()
+                            )))?;
+                    }
+                }
+                writer.flush().map_err(|e| RuntimeError::IOError(format!(
+                    "write_csv() failed for '{}': {e}",
+                    path.display()
+                )))?;
+                Ok(Value::Null)
+            }
+
             other => Err(RuntimeError::RuntimeError(format!(
                 "unknown built-in: {other}"
             ))),
@@ -1454,7 +1680,17 @@ impl Interpreter {
     fn exec_set_object_path(&mut self, path: Vec<String>, op: SetOp) -> Result<(), RuntimeError> {
         // Evaluate the value first (before mutably borrowing root_window).
         let value = match op {
-            SetOp::Assign(expr) => self.eval_expr(expr)?,
+            SetOp::Assign(expr) => {
+                if let Expr::Call(name, args) = &expr {
+                    if args.is_empty() && is_event_path(&path) {
+                        Value::Str(name.clone())
+                    } else {
+                        self.eval_expr(expr)?
+                    }
+                } else {
+                    self.eval_expr(expr)?
+                }
+            }
             SetOp::Increment | SetOp::Decrement => {
                 let current = self.eval_object_path(path.clone())?;
                 match (current, &op) {
@@ -1497,9 +1733,11 @@ impl Interpreter {
 
         let (form_name, rest) = self.resolve_path_root(effective_path)?;
 
-        match rest {
+        let mut update_form = false;
+        let result = match rest {
             [control_name, prop] if prop == "position" => {
                 // Value should be JSON array [top, left, width, height]
+                let mut handled = false;
                 if let Value::Json(serde_json::Value::Array(ref arr)) = value {
                     if arr.len() == 4 {
                         let nums: Vec<u32> = arr.iter()
@@ -1514,10 +1752,13 @@ impl Interpreter {
                         } else {
                             eprintln!("[WARN] no control named '{}' in form '{}'", control_name, form_name);
                         }
-                        return Ok(());
+                        update_form = true;
+                        handled = true;
                     }
                 }
-                eprintln!("[WARN] position value is not a 4-element JSON array: {:?}", value);
+                if !handled {
+                    eprintln!("[WARN] position value is not a 4-element JSON array: {:?}", value);
+                }
                 Ok(())
             }
             [control_name, prop] => {
@@ -1533,6 +1774,7 @@ impl Interpreter {
                 } else {
                     eprintln!("[WARN] no control named '{}' in form '{}'", control_name, form_name);
                 }
+                update_form = true;
                 Ok(())
             }
             [prop] => {
@@ -1545,12 +1787,26 @@ impl Interpreter {
                 if let Err(warn) = form.properties.set_property(prop, &val_str) {
                     eprintln!("{warn}");
                 }
+                update_form = true;
                 Ok(())
             }
             _ => Err(RuntimeError::RuntimeError(
                 format!("invalid object path: {:?}", path)
             )),
+        };
+
+        if update_form {
+            if let Some(ref tx) = self.gui_tx {
+                if let Some(updated) = self.root_window.forms.get(&form_name).cloned() {
+                    let _ = tx.send(crate::gui_channel::GuiCommand::UpdateForm {
+                        name: form_name.clone(),
+                        instance: updated,
+                    });
+                }
+            }
         }
+
+        result
     }
 
     /// Read a value from an object path.
@@ -1641,18 +1897,22 @@ impl Interpreter {
             ));
         }
 
-        let form = self.root_window.forms.get_mut(&form_name)
-            .ok_or_else(|| RuntimeError::RuntimeError(
-                format!("no form named '{}' in rootWindow", form_name)
-            ))?;
-        form.is_open = true;
-        form.is_modal = modal;
+        let instance = {
+            let form = self.root_window.forms.get_mut(&form_name)
+                .ok_or_else(|| RuntimeError::RuntimeError(
+                    format!("no form named '{}' in rootWindow", form_name)
+                ))?;
+            form.is_open = true;
+            form.is_modal = modal;
+            form.clone()
+        };
 
         // Phase 8: No actual GUI window yet. Send command if channel is present.
         if let Some(ref tx) = self.gui_tx {
             let _ = tx.send(crate::gui_channel::GuiCommand::ShowForm {
                 name: form_name.clone(),
                 modal,
+                instance,
             });
         }
         if modal && self.gui_rx.is_some() {
@@ -1667,13 +1927,49 @@ impl Interpreter {
                 let msg = self.gui_rx.as_ref().and_then(|rx| rx.try_recv().ok());
                 match msg {
                     Some(crate::gui_channel::GuiResponse::FormClosed { name }) if name == form_name => break,
-                    Some(crate::gui_channel::GuiResponse::EventFired { form, control, event }) => {
-                        let _ = self.dispatch_event(&form, &control, &event);
+                    Some(crate::gui_channel::GuiResponse::EventFired { form, control, event, value }) => {
+                        let _ = self.dispatch_event(&form, &control, &event, value);
                     }
                     None => std::thread::sleep(std::time::Duration::from_millis(10)),
                     _ => {}
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn pump_gui_events(&mut self) -> Result<(), RuntimeError> {
+        if self.gui_rx.is_none() {
+            return Ok(());
+        }
+        loop {
+            let msg = match self.gui_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+                Some(msg) => msg,
+                None => break,
+            };
+            match msg {
+                crate::gui_channel::GuiResponse::EventFired { form, control, event, value } => {
+                    self.dispatch_event(&form, &control, &event, value)?;
+                }
+                crate::gui_channel::GuiResponse::FormClosed { name } => {
+                    if let Some(form) = self.root_window.forms.get_mut(&name) {
+                        form.is_open = false;
+                    }
+                }
+                crate::gui_channel::GuiResponse::DialogResult { .. } => {}
+                crate::gui_channel::GuiResponse::Ready => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn wait_for_open_forms(&mut self) -> Result<(), RuntimeError> {
+        if self.gui_rx.is_none() {
+            return Ok(());
+        }
+        while self.root_window.forms.values().any(|f| f.is_open) {
+            self.pump_gui_events()?;
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         Ok(())
     }
@@ -1690,14 +1986,68 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Evaluate a dialog call. Phase 8: returns empty string / default values.
+    /// Evaluate a dialog call.
     fn eval_dialog_call(&mut self, call: DialogCall) -> Result<Value, RuntimeError> {
-        match call {
-            DialogCall::OpenFile { .. } | DialogCall::SaveFile { .. } => Ok(Value::Str(String::new())),
-            DialogCall::Message { .. } => Ok(Value::Str("ok".to_string())),
+        if self.gui_tx.is_none() || self.gui_rx.is_none() {
+            return match call {
+                DialogCall::OpenFile { .. } | DialogCall::SaveFile { .. } => Ok(Value::Str(String::new())),
+                DialogCall::Message { .. } => Ok(Value::Str("ok".to_string())),
+                DialogCall::ColorPicker { initial } => {
+                    let val = self.eval_expr(*initial)?;
+                    Ok(val)
+                }
+            };
+        }
+
+        let request = match call {
+            DialogCall::OpenFile { title, filter } => {
+                let title = self.eval_expr(*title)?.to_display_string();
+                let filter = self.eval_expr(*filter)?.to_display_string();
+                crate::gui_channel::DialogRequest::OpenFile { title, filter }
+            }
+            DialogCall::SaveFile { title, filter } => {
+                let title = self.eval_expr(*title)?.to_display_string();
+                let filter = self.eval_expr(*filter)?.to_display_string();
+                crate::gui_channel::DialogRequest::SaveFile { title, filter }
+            }
+            DialogCall::Message { title, message, kind } => {
+                let title = self.eval_expr(*title)?.to_display_string();
+                let message = self.eval_expr(*message)?.to_display_string();
+                crate::gui_channel::DialogRequest::Message { title, message, kind }
+            }
             DialogCall::ColorPicker { initial } => {
-                let val = self.eval_expr(*initial)?;
-                Ok(val)
+                let initial = self.eval_expr(*initial)?.to_display_string();
+                crate::gui_channel::DialogRequest::ColorPicker { initial }
+            }
+        };
+
+        self.dialog_seq += 1;
+        let id = self.dialog_seq;
+        if let Some(ref tx) = self.gui_tx {
+            let _ = tx.send(crate::gui_channel::GuiCommand::DialogCall { id, request });
+        }
+        self.wait_for_dialog_result(id)
+    }
+
+    fn wait_for_dialog_result(&mut self, id: u64) -> Result<Value, RuntimeError> {
+        loop {
+            let msg = self.gui_rx.as_ref().and_then(|rx| rx.try_recv().ok());
+            match msg {
+                Some(crate::gui_channel::GuiResponse::DialogResult { id: got_id, value })
+                    if got_id == id => {
+                    return Ok(Value::Str(value));
+                }
+                Some(crate::gui_channel::GuiResponse::EventFired { form, control, event, value }) => {
+                    self.dispatch_event(&form, &control, &event, value)?;
+                }
+                Some(crate::gui_channel::GuiResponse::FormClosed { name }) => {
+                    if let Some(form) = self.root_window.forms.get_mut(&name) {
+                        form.is_open = false;
+                    }
+                }
+                Some(crate::gui_channel::GuiResponse::Ready) => {}
+                Some(crate::gui_channel::GuiResponse::DialogResult { .. }) => {}
+                None => std::thread::sleep(std::time::Duration::from_millis(10)),
             }
         }
     }
@@ -1961,8 +2311,39 @@ impl Interpreter {
     }
 
     /// Dispatch a GUI event to the registered callback function.
-    pub fn dispatch_event(&mut self, form: &str, control: &str, event: &str) -> Result<(), RuntimeError> {
+    pub fn dispatch_event(
+        &mut self,
+        form: &str,
+        control: &str,
+        event: &str,
+        value: Option<String>,
+    ) -> Result<(), RuntimeError> {
         use crate::form_registry::ControlState;
+
+        if let Some(value) = value {
+            if let Some(form_state) = self.root_window.forms.get_mut(form) {
+                if let Some(ctrl_state) = form_state.controls.get_mut(control) {
+                    match ctrl_state {
+                        ControlState::Textbox { value: v, .. } if event == "change" => {
+                            *v = value;
+                        }
+                        ControlState::Checkbox { checked, .. } if event == "change" => {
+                            *checked = value == "true";
+                        }
+                        ControlState::Switch { checked, .. } if event == "change" => {
+                            *checked = value == "true";
+                        }
+                        ControlState::Radiobutton { checked, .. } if event == "change" => {
+                            *checked = value == "true";
+                        }
+                        ControlState::Select { items, selected_index, .. } if event == "change" => {
+                            *selected_index = items.iter().position(|item| item == &value);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
 
         let callback = self.root_window.forms.get(form)
             .and_then(|f| f.controls.get(control))
@@ -1982,6 +2363,52 @@ impl Interpreter {
             self.call_function(&fn_name, vec![])?;
         }
         Ok(())
+    }
+
+    fn resolve_io_path(&self, raw: &str) -> Result<PathBuf, RuntimeError> {
+        let path = Path::new(raw);
+        if path.is_absolute() {
+            return Ok(path.to_path_buf());
+        }
+
+        if let Some(program_path) = &self.program_path {
+            let base = program_path
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+            return Ok(base.join(path));
+        }
+
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .map_err(|e| RuntimeError::IOError(e.to_string()))
+    }
+
+    fn expect_string_arg(
+        &self,
+        value: &Value,
+        func: &str,
+        arg: &str,
+    ) -> Result<String, RuntimeError> {
+        match value {
+            Value::Str(s) => Ok(s.clone()),
+            _ => Err(RuntimeError::TypeError(format!(
+                "{func}() {arg} must be string"
+            ))),
+        }
+    }
+
+    fn expect_boolean_arg(
+        &self,
+        value: &Value,
+        func: &str,
+        arg: &str,
+    ) -> Result<bool, RuntimeError> {
+        match value {
+            Value::Boolean(b) => Ok(*b),
+            _ => Err(RuntimeError::TypeError(format!(
+                "{func}() {arg} must be boolean"
+            ))),
+        }
     }
 }
 
@@ -2101,6 +2528,10 @@ fn compare_values(a: &Value, op: &CmpOp, b: &Value) -> Result<bool, RuntimeError
             b.type_name()
         ))),
     }
+}
+
+fn is_event_path(path: &[String]) -> bool {
+    matches!(path.last().map(String::as_str), Some("click") | Some("change") | Some("select"))
 }
 
 fn apply_cmp<T: PartialOrd>(a: T, op: &CmpOp, b: T) -> bool {
@@ -2526,5 +2957,22 @@ fn is_builtin(name: &str) -> bool {
             | "string"
             | "append"
             | "env"
+            | "read_text"
+            | "write_text"
+            | "read_json"
+            | "write_json"
+            | "read_csv"
+            | "write_csv"
     )
+}
+
+fn json_value_to_csv(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Array(arr) => serde_json::Value::Array(arr.clone()).to_string(),
+        serde_json::Value::Object(map) => serde_json::Value::Object(map.clone()).to_string(),
+    }
 }

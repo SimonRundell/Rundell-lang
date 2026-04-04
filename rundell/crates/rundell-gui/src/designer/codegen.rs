@@ -1,7 +1,7 @@
 //! Code generator: produces Rundell form-definition source from designer state.
 
 use super::DesignControl;
-use rundell_interpreter::form_registry::ControlState;
+use rundell_interpreter::form_registry::{ControlState, TextAlign};
 use rundell_parser::ast::ControlType;
 
 /// Generate a Rundell `define ... as form --> ... <--` block from the current
@@ -10,16 +10,58 @@ use rundell_parser::ast::ControlType;
 /// Only properties that differ from their defaults are emitted.
 pub fn generate(form_name: &str, controls: &[DesignControl]) -> String {
     let mut lines = Vec::new();
+    emit_handler_stubs(&mut lines, controls);
     lines.push(format!("define {form_name} as form -->"));
+    emit_default_form_style(&mut lines, form_name);
 
     for ctrl in controls {
         let type_name = ctrl_type_name(&ctrl.ctrl_type);
         lines.push(format!("    define {} as form\\{type_name}.", ctrl.name));
         emit_properties(&mut lines, &ctrl.name, &ctrl.state);
+        emit_events(&mut lines, ctrl);
     }
 
     lines.push("<--".to_string());
     lines.join("\n")
+}
+
+fn emit_handler_stubs(lines: &mut Vec<String>, controls: &[DesignControl]) {
+    let mut handlers: Vec<String> = Vec::new();
+    for ctrl in controls {
+        push_handler(&mut handlers, &ctrl.events.click);
+        push_handler(&mut handlers, &ctrl.events.change);
+        push_handler(&mut handlers, &ctrl.events.select);
+    }
+    handlers.sort();
+    handlers.dedup();
+
+    if handlers.is_empty() {
+        return;
+    }
+
+    for handler in handlers {
+        lines.push(format!("define {handler}() returns null -->"));
+        lines.push("    return null.".to_string());
+        lines.push("<--".to_string());
+        lines.push("".to_string());
+    }
+}
+
+fn push_handler(list: &mut Vec<String>, name: &str) {
+    let trimmed = name.trim();
+    if !trimmed.is_empty() {
+        list.push(trimmed.to_string());
+    }
+}
+
+fn emit_default_form_style(lines: &mut Vec<String>, form_name: &str) {
+    lines.push(format!("    set form\\title = \"{form_name}\"."));
+    lines.push("    set form\\width = 760px.".to_string());
+    lines.push("    set form\\height = 520px.".to_string());
+    lines.push("    set form\\resizable = true.".to_string());
+    lines.push("    set form\\backgroundcolor = \"#F2F2F2\".".to_string());
+    lines.push("    set form\\textcolor = \"#202020\".".to_string());
+    lines.push("    set form\\textbackground = \"#FFFFFF\".".to_string());
 }
 
 fn ctrl_type_name(ct: &ControlType) -> &'static str {
@@ -45,7 +87,7 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
     ));
 
     match state {
-        ControlState::Label { value, text_color, font_size, .. } => {
+        ControlState::Label { value, text_color, font_size, text_align, .. } => {
             if !value.is_empty() {
                 lines.push(format!("    set {}\\value = \"{value}\".", name));
             }
@@ -55,8 +97,11 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
             if *font_size != 12 {
                 lines.push(format!("    set {}\\fontsize = {font_size}.", name));
             }
+            if *text_align != TextAlign::Left {
+                lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
+            }
         }
-        ControlState::Textbox { value, placeholder, readonly, text_color, .. } => {
+        ControlState::Textbox { value, placeholder, readonly, text_color, text_align, .. } => {
             if !value.is_empty() {
                 lines.push(format!("    set {}\\value = \"{value}\".", name));
             }
@@ -69,8 +114,11 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
             if text_color != "#000000" {
                 lines.push(format!("    set {}\\textcolor = \"{text_color}\".", name));
             }
+            if *text_align != TextAlign::Left {
+                lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
+            }
         }
-        ControlState::Button { caption, text_color, background_color, .. } => {
+        ControlState::Button { caption, text_color, background_color, text_align, .. } => {
             if !caption.is_empty() {
                 lines.push(format!("    set {}\\caption = \"{caption}\".", name));
             }
@@ -80,8 +128,11 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
             if background_color != "#E0E0E0" {
                 lines.push(format!("    set {}\\backgroundcolor = \"{background_color}\".", name));
             }
+            if *text_align != TextAlign::Center {
+                lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
+            }
         }
-        ControlState::Radiobutton { caption, group, checked, .. } => {
+        ControlState::Radiobutton { caption, group, checked, text_align, .. } => {
             if !caption.is_empty() {
                 lines.push(format!("    set {}\\caption = \"{caption}\".", name));
             }
@@ -91,25 +142,37 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
             if *checked {
                 lines.push(format!("    set {}\\checked = true.", name));
             }
+            if *text_align != TextAlign::Left {
+                lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
+            }
         }
-        ControlState::Checkbox { caption, checked, .. } => {
+        ControlState::Checkbox { caption, checked, text_align, .. } => {
             if !caption.is_empty() {
                 lines.push(format!("    set {}\\caption = \"{caption}\".", name));
             }
             if *checked {
                 lines.push(format!("    set {}\\checked = true.", name));
             }
+            if *text_align != TextAlign::Left {
+                lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
+            }
         }
-        ControlState::Switch { caption, checked, .. } => {
+        ControlState::Switch { caption, checked, text_align, .. } => {
             if !caption.is_empty() {
                 lines.push(format!("    set {}\\caption = \"{caption}\".", name));
             }
             if *checked {
                 lines.push(format!("    set {}\\checked = true.", name));
             }
+            if *text_align != TextAlign::Left {
+                lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
+            }
         }
-        ControlState::Select { .. } => {
+        ControlState::Select { text_align, .. } => {
             // Items are typically set via code, not in the designer.
+            if *text_align != TextAlign::Left {
+                lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
+            }
         }
         ControlState::Listbox { columns, multi_select, row_height, header_visible, .. } => {
             if !columns.is_empty() {
@@ -128,6 +191,36 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
                 lines.push(format!("    set {}\\headervisible = false.", name));
             }
         }
+    }
+}
+
+fn emit_events(lines: &mut Vec<String>, ctrl: &DesignControl) {
+    let name = &ctrl.name;
+    match ctrl.ctrl_type {
+        ControlType::Button => {
+            emit_event_line(lines, name, "click", &ctrl.events.click);
+        }
+        ControlType::Textbox => {
+            emit_event_line(lines, name, "change", &ctrl.events.change);
+        }
+        ControlType::Radiobutton
+        | ControlType::Checkbox
+        | ControlType::Switch
+        | ControlType::Select => {
+            emit_event_line(lines, name, "change", &ctrl.events.change);
+        }
+        ControlType::Listbox => {
+            emit_event_line(lines, name, "change", &ctrl.events.change);
+            emit_event_line(lines, name, "select", &ctrl.events.select);
+        }
+        ControlType::Label => {}
+    }
+}
+
+fn emit_event_line(lines: &mut Vec<String>, ctrl_name: &str, event: &str, handler: &str) {
+    let trimmed = handler.trim();
+    if !trimmed.is_empty() {
+        lines.push(format!("    set {ctrl_name}\\{event} = {trimmed}()."));
     }
 }
 
@@ -168,6 +261,7 @@ mod tests {
             name: "submitBtn".to_string(),
             ctrl_type: ControlType::Button,
             state: button_state,
+            events: super::ControlEvents::default(),
         }];
 
         let code = generate("myForm", &controls);

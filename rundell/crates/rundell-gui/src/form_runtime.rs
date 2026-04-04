@@ -7,12 +7,24 @@ use std::collections::HashMap;
 
 use egui::{Color32, Context, Vec2};
 
-use rundell_interpreter::form_registry::{ControlState, FormInstance};
+use rundell_interpreter::form_registry::FormInstance;
 
 use crate::controls;
 
-/// A (form, control, event) triple emitted when the user interacts.
-pub type EventTuple = (String, String, String);
+/// A GUI event emitted when the user interacts.
+#[derive(Debug, Clone)]
+pub struct GuiEvent {
+    pub form: String,
+    pub control: String,
+    pub event: String,
+    pub value: Option<String>,
+}
+
+/// Render output for a single frame.
+pub struct RenderResult {
+    pub events: Vec<GuiEvent>,
+    pub closed_forms: Vec<String>,
+}
 
 /// Rendering metadata for a single open form window.
 struct OpenForm {
@@ -42,12 +54,13 @@ impl FormRuntime {
     }
 
     /// Register a form as open.
-    pub fn show_form(&mut self, name: String, modal: bool) {
+    pub fn show_form(&mut self, name: String, modal: bool, instance: FormInstance) {
         let entry = self.forms.entry(name.clone()).or_insert_with(|| OpenForm {
-            instance: FormInstance::new(),
+            instance: instance.clone(),
             modal,
             dirty: true,
         });
+        entry.instance = instance;
         entry.instance.is_open = true;
         entry.instance.is_modal = modal;
         entry.modal = modal;
@@ -89,77 +102,91 @@ impl FormRuntime {
         }
     }
 
-    /// Render all open forms.  Returns a list of `(form, control, event)`
-    /// triples for interactions that occurred this frame.
-    pub fn render_all(&mut self, ctx: &Context) -> Vec<EventTuple> {
+    /// Render all open forms.  Returns a list of GUI events that occurred
+    /// this frame.
+    pub fn render_all(&mut self, ctx: &Context) -> RenderResult {
         let mut events = Vec::new();
+        let mut closed_forms = Vec::new();
 
         let open_names: Vec<String> = self.open_order.clone();
 
         for name in &open_names {
-            let Some(open) = self.forms.get(name) else { continue };
-            if !open.instance.is_open { continue; }
+            let mut closed = false;
+            {
+                let Some(open) = self.forms.get_mut(name) else { continue };
+                if !open.instance.is_open { continue; }
 
-            let props = open.instance.properties.clone();
-            let controls_snapshot: Vec<(String, ControlState)> =
-                open.instance.controls.iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-            let _modal = open.modal;
-            let form_name = name.clone();
+                let props = open.instance.properties.clone();
+                let control_names: Vec<String> = open.instance.controls.keys().cloned().collect();
+                let _modal = open.modal;
+                let form_name = name.clone();
 
-            let bg = hex_to_color32(&props.background_color);
-            let w = props.width as f32;
-            let h = props.height as f32;
-            let title = props.title.clone();
-            let resizable = props.resizable;
+                let bg = hex_to_color32(&props.background_color);
+                let w = props.width as f32;
+                let h = props.height as f32;
+                let title = props.title.clone();
+                let resizable = props.resizable;
 
-            let mut win_open = true;
+                let mut win_open = true;
 
-            let window = egui::Window::new(&title)
-                .id(egui::Id::new(&form_name))
-                .resizable(resizable)
-                .collapsible(false)
-                .min_size(Vec2::new(w, h))
-                .max_size(Vec2::new(w, h))
-                .open(&mut win_open);
+                let mut window = egui::Window::new(&title)
+                    .id(egui::Id::new(&form_name))
+                    .resizable(resizable)
+                    .collapsible(false)
+                    .default_size(Vec2::new(w, h))
+                    .open(&mut win_open);
 
-            let resp = window.show(ctx, |ui| {
-                let mut frame_events: Vec<EventTuple> = Vec::new();
-
-                // Fill the background.
-                let rect = ui.available_rect_before_wrap();
-                ui.painter().rect_filled(rect, 0.0, bg);
-
-                for (ctrl_name, ctrl_state) in &controls_snapshot {
-                    let evts = controls::render_control(
-                        ui,
-                        ctx,
-                        &form_name,
-                        ctrl_name,
-                        ctrl_state,
-                    );
-                    frame_events.extend(evts);
+                if resizable {
+                    window = window.min_size(Vec2::new(200.0, 150.0));
+                } else {
+                    window = window.min_size(Vec2::new(w, h)).max_size(Vec2::new(w, h));
                 }
-                frame_events
-            });
 
-            if let Some(inner) = resp {
-                if let Some(evts) = inner.inner {
-                    events.extend(evts);
+                let resp = window.show(ctx, |ui| {
+                    let mut frame_events: Vec<GuiEvent> = Vec::new();
+
+                    // Fill the background.
+                    let rect = ui.available_rect_before_wrap();
+                    ui.painter().rect_filled(rect, 0.0, bg);
+
+                    for ctrl_name in &control_names {
+                        if let Some(ctrl_state) = open.instance.controls.get_mut(ctrl_name) {
+                            let evts = controls::render_control(
+                                ui,
+                                ctx,
+                                &form_name,
+                                ctrl_name,
+                                ctrl_state,
+                            );
+                            frame_events.extend(evts);
+                        }
+                    }
+                    frame_events
+                });
+
+                if let Some(inner) = resp {
+                    if let Some(evts) = inner.inner {
+                        events.extend(evts);
+                    }
+                }
+
+                if !win_open {
+                    open.instance.is_open = false;
+                    closed = true;
                 }
             }
 
-            // If the window was closed via the X button, fire a FormClosed event.
-            if !win_open {
-                if let Some(f) = self.forms.get_mut(name) {
-                    f.instance.is_open = false;
-                }
+            if closed {
                 self.open_order.retain(|n| n != name);
+                closed_forms.push(name.clone());
             }
         }
 
-        events
+        RenderResult { events, closed_forms }
+    }
+
+    pub fn has_open_forms(&self) -> bool {
+        !self.open_order.is_empty()
     }
 }
 

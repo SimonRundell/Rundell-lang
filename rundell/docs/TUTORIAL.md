@@ -32,6 +32,7 @@ This tutorial takes you from zero to a working knowledge of Rundell — includin
 24. [Handling Query Errors](#24-handling-query-errors)
 25. [Authenticated APIs](#25-authenticated-apis)
 26. [REST Data in a GUI Listbox](#26-rest-data-in-a-gui-listbox)
+27. [File I/O](#27-file-io)
 
 ---
 
@@ -423,7 +424,7 @@ define myForm as form -->
     set form\width  = 400px.
     set form\height = 200px.
     define myLabel as form\label.
-    set myLabel\position = 10px, 10px, 380px, 30px.
+    set myLabel\position = 10px, 10px, 380px, 30px.  # top, left, width, height
     set myLabel\value    = "Welcome to Rundell!".
 <--
 
@@ -1018,7 +1019,7 @@ define userForm as form -->
     define statusLbl  as form\label.
     define userList   as form\listbox.
 
-    set loadBtn\position   = 10px, 10px, 120px, 30px.
+    set loadBtn\position   = 10px, 10px, 120px, 30px.  # top, left, width, height
     set loadBtn\caption    = "Load Users".
     set loadBtn\click      = loadUsers().
 
@@ -1048,6 +1049,43 @@ rootWindow\userForm\show().
 - `set userForm\userList\datasource = await getUsers().` — the query result is assigned directly to the listbox without an intermediate variable.
 - The status label changes to show loading state, then `"Loaded."` on success or the error message on failure.
 - All network activity happens on button click inside an `attempt / catch` block, so a failed request updates the status label rather than crashing the program.
+
+---
+
+## 27. File I/O
+
+Rundell can read and write UTF-8 text, JSON, and CSV files. Paths are strings; relative paths resolve against the `.run` file directory.
+
+### Text and JSON
+
+```
+define notePath as string = "notes.txt".
+write_text(notePath, "Line one" + newline() + "Line two").
+
+define contents as string = read_text(notePath).
+print contents + newline().
+
+define settings as json = { "theme": "light", "fontSize": 14 }.
+write_json("settings.json", settings).
+
+define loaded as json = read_json("settings.json").
+print loaded["theme"] + newline().
+```
+
+### CSV
+
+```
+define rows as json = [].
+append(rows, { "name": "Ada", "age": 36 }).
+append(rows, { "name": "Linus", "age": 55 }).
+
+write_csv("people.csv", rows, true).  # include headers
+define loaded as json = read_csv("people.csv", true).
+
+print loaded[0]["name"] + newline().
+```
+
+`read_csv(..., true)` returns a json array of objects; `read_csv(..., false)` returns a json array of arrays.
 
 ---
 

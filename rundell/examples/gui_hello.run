@@ -8,7 +8,7 @@ define myForm as form -->
     define okBtn   as form\button.
     set nameBox\position    = 10px, 10px, 280px, 28px.
     set nameBox\placeholder = "Enter your name".
-    set okBtn\position      = 10px, 50px, 100px, 30px.
+    set okBtn\position      = 50px, 10px, 100px, 30px.
     set okBtn\caption       = "Say Hello".
     set okBtn\click         = greet().
 <--

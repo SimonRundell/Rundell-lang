@@ -40,6 +40,7 @@ rootWindow\myForm\show().
 - [REPL](#repl)
 - [Language at a Glance](#language-at-a-glance)
 - [Further Reading](#further-reading)
+- [What's New in 0.1.3](#whats-new-in-013)
 
 ---
 
@@ -54,8 +55,8 @@ cargo build --release
 # Run the hello world example
 ./target/release/rundell examples/hello_world.run
 
-# Run a GUI example
-cargo run -p rundell-gui -- examples/gui_hello.run
+# Run a GUI example (auto-launches GUI when forms are used)
+./target/release/rundell examples/gui_hello.run
 
 # Open the visual form designer
 cargo run -p rundell-gui -- --design
@@ -90,10 +91,15 @@ Rundell source files use the `.run` extension and must be UTF-8 encoded.
 
 ## GUI Programs
 
-GUI programs use `rundell-gui` instead of `rundell`:
+GUI programs can be run with `rundell` directly. The CLI auto-launches the GUI
+runtime when a program uses forms or dialogs. You can still run the GUI binary
+explicitly if you prefer:
 
 ```bash
-# Run a GUI program
+# Run a GUI program via CLI (auto GUI)
+rundell my_form.run
+
+# Run a GUI program explicitly
 cargo run -p rundell-gui -- my_form.run
 
 # Open the visual form designer
@@ -110,7 +116,7 @@ Launch the interactive Read-Eval-Print Loop by running `rundell` with no argumen
 
 ```
 $ rundell
-Rundell 0.1.0  —  type 'exit' or Ctrl+D to quit
+Rundell 0.1.3  —  type 'exit' or Ctrl+D to quit
 > define x as integer = 10.
 > print string(x * 2) + newline().
 20
@@ -138,6 +144,7 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 | Function | `define add(a as integer, b as integer) returns integer --> ... <--` |
 | Error handling | `try --> ... catch (TypeError) --> ... finally --> ... <--` |
 | Module import | `import "myModule".` |
+| File I/O | `define text as string = read_text("notes.txt").` |
 
 ### GUI system
 
@@ -146,7 +153,7 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 | Define a form | `define myForm as form --> ... <--` |
 | Add a control | `define myLabel as form\label.` |
 | Set a property | `set myLabel\value = "Hello".` |
-| Set position | `set myLabel\position = 10px, 10px, 200px, 30px.` |
+| Set position | `set myLabel\position = 10px, 10px, 200px, 30px.` *(top, left, width, height)* |
 | Show (modeless) | `rootWindow\myForm\show().` |
 | Show (modal) | `rootWindow\myForm\show(modal).` |
 | Close | `rootWindow\myForm\close().` |
@@ -172,6 +179,8 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 | [`examples/string_utils.run`](examples/string_utils.run) | String manipulation demos |
 | [`examples/contact_book.run`](examples/contact_book.run) | In-memory contact list |
 | [`examples/error_handling_demo.run`](examples/error_handling_demo.run) | try/catch/finally patterns |
+| [`examples/file_io_text_json.run`](examples/file_io_text_json.run) | Read/write UTF-8 text and JSON |
+| [`examples/file_io_csv.run`](examples/file_io_csv.run) | Read/write CSV data |
 
 ### GUI programs (run with `rundell-gui`)
 
@@ -190,6 +199,17 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 - [**Tutorial**](docs/TUTORIAL.md) — step-by-step introduction for new users
 - [**Language Reference**](docs/LANGUAGE_REFERENCE.md) — complete specification with examples
 - [**Examples**](examples/) — ready-to-run sample programs (console and GUI)
+
+---
+
+## What's New in 0.1.3
+
+- Auto GUI launch from `rundell` when forms/dialogs are used
+- File I/O built-ins for UTF-8 text, JSON, and CSV
+- GUI control `textalign` property (left/center/right)
+- Designer enhancements: tabs, editor, file menu, events, undo/delete
+- Form runtime fixes: proper control positioning and live input updates
+- Dialogs now use native OS dialogs for file/message boxes
 
 ---
 

@@ -1,34 +1,53 @@
 //! Radiobutton control renderer.
 
-use egui::{Context, Ui, pos2, vec2};
-use rundell_interpreter::form_registry::Position;
-use crate::form_runtime::EventTuple;
+use egui::{Align, Context, Layout, Ui, pos2, vec2};
+use rundell_interpreter::form_registry::{Position, TextAlign};
+use crate::form_runtime::GuiEvent;
 
 /// Render a radiobutton. Fires `"change"` when checked state changes.
 pub fn render(
-    _ui: &mut Ui,
+    ui: &mut Ui,
     ctx: &Context,
     form_name: &str,
     ctrl_name: &str,
     position: &Position,
     caption: &str,
-    checked: bool,
+    checked: &mut bool,
     enabled: bool,
-) -> Vec<EventTuple> {
+    text_align: TextAlign,
+) -> Vec<GuiEvent> {
     let id = egui::Id::new(format!("{form_name}_{ctrl_name}"));
     let mut events = Vec::new();
-    let current = checked;
+    let current = *checked;
+    let origin = ui.available_rect_before_wrap().min;
 
     egui::Area::new(id)
-        .fixed_pos(pos2(position.left as f32, position.top as f32))
+        .fixed_pos(pos2(origin.x + position.left as f32, origin.y + position.top as f32))
         .show(ctx, |ui| {
             ui.set_min_size(vec2(position.width as f32, position.height as f32));
-            ui.add_enabled_ui(enabled, |ui| {
-                if ui.radio(current, caption).clicked() {
-                    events.push((form_name.to_string(), ctrl_name.to_string(), "change".to_string()));
-                }
+            let layout = layout_from_text_align(text_align);
+            ui.allocate_ui_with_layout(vec2(position.width as f32, position.height as f32), layout, |ui| {
+                ui.add_enabled_ui(enabled, |ui| {
+                    if ui.radio(current, caption).clicked() {
+                        *checked = true;
+                        events.push(GuiEvent {
+                            form: form_name.to_string(),
+                            control: ctrl_name.to_string(),
+                            event: "change".to_string(),
+                            value: Some("true".to_string()),
+                        });
+                    }
+                });
             });
         });
 
     events
+}
+
+fn layout_from_text_align(text_align: TextAlign) -> Layout {
+    match text_align {
+        TextAlign::Left => Layout::left_to_right(Align::Min),
+        TextAlign::Center => Layout::left_to_right(Align::Center),
+        TextAlign::Right => Layout::left_to_right(Align::Max),
+    }
 }

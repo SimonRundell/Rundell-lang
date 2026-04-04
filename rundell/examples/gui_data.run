@@ -1,0 +1,148 @@
+# this code creates a gui interface to some dummy records on a live api call
+# the user can move through the records with the buttons
+
+define global users as json.
+define global currentRecord as integer = 0.
+
+define refreshRecord() returns null -->
+    if (users is null or length(users) == 0) -->
+        set myForm\LastName\value = "".
+        set myForm\FirstName\value = "".
+        set myForm\address\value = "".
+        set myForm\postcode\value = "".
+        set myForm\telephone\value = "".
+        return null.
+    <--
+    set myForm\LastName\value = users[currentRecord]["LastName"].
+    set myForm\FirstName\value = users[currentRecord]["FirstName"].
+    set myForm\address\value = users[currentRecord]["Address"].
+    set myForm\postcode\value = users[currentRecord]["Postcode"].
+    set myForm\telephone\value = users[currentRecord]["Phone"].
+    return null.
+<--
+
+define nextRecord() returns null -->
+    if (users is null or length(users) == 0) -->
+        return null.
+    <--
+    define count as integer = length(users).
+    if (currentRecord < count - 1) -->
+        set currentRecord = currentRecord + 1.
+    <--
+    refreshRecord().
+    define answer as string.
+    set answer = dialog\message("Next", "This is the next record", ok).
+    return null.
+<--
+
+define prevRecord() returns null -->
+    if (users is null or length(users) == 0) -->
+        return null.
+    <--
+    if (currentRecord > 0) -->
+        set currentRecord = currentRecord - 1.
+    <--
+    refreshRecord().
+    define answer as string.
+    set answer = dialog\message("Previous", "This is the previous record", ok).
+    return null.
+<--
+
+define firstRecord() returns null -->
+    if (users is null or length(users) == 0) -->
+        return null.
+    <--
+    set currentRecord = 0.
+    refreshRecord().
+     define answer as string.
+    set answer = dialog\message("First", "This is the first record", ok).
+    return null.
+<--
+
+define lastRecord() returns null -->
+    if (users is null or length(users) == 0) -->
+        return null.
+    <--
+    set currentRecord = length(users) - 1.
+    refreshRecord().
+     define answer as string.
+    set answer = dialog\message("Last", "This is the last record", ok).
+    return null.
+<--
+
+define exitApp() returns null -->
+    rootWindow\myForm\close().
+    return null.
+<--
+
+define getData() as query returns json -->
+    set getData\method      = GET.
+    set getData\endpoint    = "https://rundell.org.uk/getAddress.php".
+<--
+
+define myForm as form -->
+    set form\title  = "Address Book".
+    set form\width  = 720px.
+    set form\height = 520px.
+
+    define lblFirst as form\label.
+    define lblLast as form\label.
+    define lblAddress as form\label.
+    define lblPostcode as form\label.
+    define lblPhone as form\label.
+
+    set lblFirst\position = 40px, 40px, 120px, 24px.
+    set lblFirst\value = "First name".
+    set lblLast\position = 80px, 40px, 120px, 24px.
+    set lblLast\value = "Last name".
+    set lblAddress\position = 120px, 40px, 120px, 24px.
+    set lblAddress\value = "Address".
+    set lblPostcode\position = 200px, 40px, 120px, 24px.
+    set lblPostcode\value = "Postcode".
+    set lblPhone\position = 240px, 40px, 120px, 24px.
+    set lblPhone\value = "Telephone".
+
+    define FirstName as form\textbox.
+    set FirstName\position = 40px, 170px, 460px, 30px.
+    define LastName as form\textbox.
+    set LastName\position = 80px, 170px, 460px, 30px.
+    define address as form\textbox.
+    set address\position = 120px, 170px, 500px, 30px.
+    define postcode as form\textbox.
+    set postcode\position = 200px, 170px, 200px, 30px.
+    define telephone as form\textbox.
+    set telephone\position = 240px, 170px, 260px, 30px.
+    define btnFirst as form\button.
+    set btnFirst\position = 320px, 170px, 70px, 30px.
+    set btnFirst\caption = "First".
+    set btnFirst\click = firstRecord().
+    define btnPrev as form\button.
+    set btnPrev\position = 320px, 250px, 70px, 30px.
+    set btnPrev\caption = "Prev".
+    set btnPrev\click = prevRecord().
+    define btnNext as form\button.
+    set btnNext\position = 320px, 330px, 70px, 30px.
+    set btnNext\caption = "Next".
+    set btnNext\click = nextRecord().
+    define btnLast as form\button.
+    set btnLast\position = 320px, 410px, 70px, 30px.
+    set btnLast\caption = "Last".
+    set btnLast\click = lastRecord().
+    define btnClose as form\button.
+    set btnClose\position = 420px, 410px, 100px, 30px.
+    set btnClose\caption = "Close".
+    set btnClose\click = exitApp().
+<--
+
+attempt -->
+    define apiResult as json.
+    set apiResult = await getData().
+    set users = apiResult["rows"].
+    set currentRecord = 0.
+    refreshRecord().
+    rootWindow\myForm\show(modal).
+<-- catch err -->
+    define answer as string.
+    set answer = dialog\message("Error", "Could not access data", ok).
+<--
+

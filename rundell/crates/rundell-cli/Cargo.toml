@@ -1,6 +1,6 @@
 [package]
 name    = "rundell-cli"
-version = "0.1.1"
+version = "0.1.3"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -13,6 +13,7 @@ rundell-interpreter = { path = "../rundell-interpreter" }
 rundell-parser      = { path = "../rundell-parser"      }
 rundell-lexer       = { path = "../rundell-lexer"       }
 rundell-env         = { path = "../rundell-env"         }
+rundell-gui         = { path = "../rundell-gui"         }
 rustyline           = "14"
 miette              = { version = "7", features = ["fancy"] }
 clap                = { version = "4", features = ["derive"] }

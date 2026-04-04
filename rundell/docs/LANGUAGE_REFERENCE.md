@@ -289,6 +289,12 @@ All built-ins are expressions and can appear anywhere a value is expected.
 | `lower(str)` | string | Convert to lowercase |
 | `trim(str)` | string | Strip leading and trailing whitespace |
 | `append(collection, value)` | null | Append element to a json array (mutates in place) |
+| `read_text(path)` | string | Read a UTF-8 text file |
+| `write_text(path, content)` | null | Write a UTF-8 text file (overwrites) |
+| `read_json(path)` | json | Read and parse JSON from a file |
+| `write_json(path, value)` | null | Write JSON to a file (pretty-printed) |
+| `read_csv(path, has_headers)` | json | Read CSV into a json array |
+| `write_csv(path, rows, include_headers)` | null | Write CSV from a json array |
 
 ---
 
@@ -305,6 +311,27 @@ Writes the string representation of the expression to stdout. No newline is appe
 receive <identifier> [with prompt <stringExpression>].
 ```
 Reads one line from stdin into the named variable. The optional `with prompt` clause prints the prompt string before waiting. The input is automatically coerced to the variable's declared type; a coercion failure raises TypeError.
+
+### File I/O
+
+All file paths are strings. Relative paths resolve against the running `.run` file directory (or the current working directory in REPL mode).
+
+```
+define text as string = read_text("notes.txt").
+write_text("out.txt", text + newline()).
+
+define data as json = read_json("data.json").
+write_json("copy.json", data).
+
+define rows as json = read_csv("people.csv", true).
+write_csv("people_out.csv", rows, true).
+```
+
+CSV rules:
+- `read_csv(..., true)` returns a json array of objects (header names become keys).
+- `read_csv(..., false)` returns a json array of arrays.
+- `write_csv(..., true)` expects a json array of objects.
+- `write_csv(..., false)` expects a json array of arrays.
 
 ---
 
@@ -526,7 +553,7 @@ Control types: `label`, `textbox`, `button`, `radiobutton`, `checkbox`, `switch`
 
 | Property | Type | Default | Description |
 |---|---|---|---|
-| `position` | `top, left, width, height` | `0px, 0px, 100px, 30px` | Absolute pixel position |
+| `position` | `top, left, width, height` | `0px, 0px, 100px, 30px` | Absolute pixel position (Y, X order) |
 | `visible` | boolean | `true` | Whether the control is rendered |
 | `enabled` | boolean | `true` | Whether the control accepts input |
 
@@ -538,6 +565,7 @@ Control types: `label`, `textbox`, `button`, `radiobutton`, `checkbox`, `switch`
 | `textcolor` | string | `"#000000"` |
 | `font` | string | `"default"` |
 | `fontsize` | integer | `12` |
+| `textalign` | enum (`left`, `center`, `right`) | `left` |
 
 No events.
 
@@ -548,6 +576,7 @@ No events.
 | `value` | string | `""` |
 | `textcolor` | string | `"#000000"` |
 | `textbackground` | string | `"#FFFFFF"` |
+| `textalign` | enum (`left`, `center`, `right`) | `left` |
 | `readonly` | boolean | `false` |
 | `maxlength` | integer | (none) |
 | `placeholder` | string | `""` |
@@ -562,6 +591,7 @@ Events: `change` (fires on each keystroke).
 | `caption` | string | `""` |
 | `textcolor` | string | `"#000000"` |
 | `backgroundcolor` | string | `"#E0E0E0"` |
+| `textalign` | enum (`left`, `center`, `right`) | `center` |
 
 Events: `click`.
 
@@ -572,6 +602,7 @@ Events: `click`.
 | `caption` | string | `""` |
 | `group` | string | `""` |
 | `checked` | boolean | `false` |
+| `textalign` | enum (`left`, `center`, `right`) | `left` |
 
 Radio buttons sharing the same `group` are mutually exclusive — setting one to `checked = true` automatically clears the others.
 
@@ -583,6 +614,7 @@ Events: `change`.
 |---|---|---|
 | `caption` | string | `""` |
 | `checked` | boolean | `false` |
+| `textalign` | enum (`left`, `center`, `right`) | `left` |
 
 Events: `change`.
 
@@ -594,6 +626,7 @@ Rendered as a toggle button. `checked = true` represents On/Yes.
 |---|---|---|
 | `caption` | string | `""` |
 | `checked` | boolean | `false` |
+| `textalign` | enum (`left`, `center`, `right`) | `left` |
 
 Events: `change`.
 
@@ -603,6 +636,7 @@ Events: `change`.
 |---|---|---|---|
 | `items` | json array or csv | `[]` | `["A", "B"]` or `"A, B"` |
 | `value` | string | (none) | The currently selected item text (read) |
+| `textalign` | enum (`left`, `center`, `right`) | `left` | Align selected text |
 
 Events: `change`.
 
