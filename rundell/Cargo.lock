@@ -4065,7 +4065,7 @@ dependencies = [
 
 [[package]]
 name = "rundell-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "miette",
@@ -4078,7 +4078,7 @@ dependencies = [
 
 [[package]]
 name = "rundell-env"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "base64",
@@ -4092,7 +4092,7 @@ dependencies = [
 
 [[package]]
 name = "rundell-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "clap",
@@ -4110,7 +4110,7 @@ dependencies = [
 
 [[package]]
 name = "rundell-interpreter"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "reqwest",
  "rundell-env",
@@ -4124,7 +4124,7 @@ dependencies = [
 
 [[package]]
 name = "rundell-lexer"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "logos",
  "thiserror 1.0.69",
@@ -4132,7 +4132,7 @@ dependencies = [
 
 [[package]]
 name = "rundell-parser"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rundell-lexer",
  "serde_json",

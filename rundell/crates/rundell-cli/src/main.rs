@@ -15,13 +15,13 @@ use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
 use rundell_interpreter::Interpreter;
-use rundell_parser::parse;
+use rundell_parser::{format_parse_error, parse};
 
 /// The Rundell language interpreter.
 #[derive(ClapParser, Debug)]
 #[command(
     name = "rundell",
-    version = "0.1.0",
+    version = env!("CARGO_PKG_VERSION"),
     about = "Rundell language interpreter"
 )]
 struct Cli {
@@ -118,7 +118,7 @@ fn run_file(path: PathBuf) {
     let stmts = match parse(&source) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Parse error: {e}");
+            eprintln!("{}", format_parse_error(&source, &e));
             process::exit(1);
         }
     };
@@ -172,7 +172,7 @@ fn run_repl() {
                             }
                         }
                         Err(e) => {
-                            eprintln!("Parse error: {e}");
+                            eprintln!("{}", format_parse_error(&buffer, &e));
                         }
                     }
                     buffer.clear();
@@ -198,3 +198,4 @@ fn is_complete(buf: &str) -> bool {
     let trimmed = buf.trim_end();
     trimmed.ends_with('.') || trimmed.ends_with("<--")
 }
+

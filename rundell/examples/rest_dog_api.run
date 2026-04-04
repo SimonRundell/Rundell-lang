@@ -3,12 +3,12 @@
 # No credentials required.
 # Run with:  rundell rest_dog_api.run
 
-define getRandomDog() as query returns json -->
+define getRandomDog() returns json as query -->
     set getRandomDog\method   = GET.
     set getRandomDog\endpoint = "https://dog.ceo/api/breeds/image/random".
 <--
 
-define getAllBreeds() as query returns json -->
+define getAllBreeds() returns json as query -->
     set getAllBreeds\method   = GET.
     set getAllBreeds\endpoint = "https://dog.ceo/api/breeds/list/all".
 <--

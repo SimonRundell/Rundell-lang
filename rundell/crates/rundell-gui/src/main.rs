@@ -17,13 +17,18 @@ mod form_runtime;
 pub mod designer;
 
 use app::RundellApp;
+use rundell_parser::format_parse_error;
 
 /// Timeout for modal form blocking (milliseconds).
 pub const MODAL_TIMEOUT_MS: u64 = 30_000;
 
 /// Command-line interface for rundell-gui.
 #[derive(Parser, Debug)]
-#[command(name = "rundell-gui", about = "Rundell GUI runner and form designer")]
+#[command(
+    name = "rundell-gui",
+    version = env!("CARGO_PKG_VERSION"),
+    about = "Rundell GUI runner and form designer"
+)]
 struct Cli {
     /// Rundell source file to run (omit for designer without a file).
     file: Option<PathBuf>,
@@ -59,7 +64,7 @@ fn run_program(file: PathBuf) {
     let stmts = match rundell_parser::parse(&source) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Parse error: {e}");
+            eprintln!("{}", format_parse_error(&source, &e));
             std::process::exit(1);
         }
     };
@@ -120,3 +125,4 @@ fn run_designer(file: Option<PathBuf>) {
     )
     .unwrap_or_else(|e| eprintln!("Designer error: {e}"));
 }
+

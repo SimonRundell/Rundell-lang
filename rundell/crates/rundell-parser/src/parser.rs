@@ -338,6 +338,7 @@ impl Parser {
                     if depth == 0 { break; }
                     depth -= 1;
                     i += 1;
+                    if depth == 0 { break; }
                 }
                 None => return false,
                 _ => { i += 1; }
