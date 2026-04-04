@@ -1,6 +1,6 @@
 //! Textbox (single-line text input) control renderer.
 
-use egui::{Align, Context, TextEdit, Ui, pos2, vec2};
+use egui::{Align, Context, FontId, TextEdit, Ui, pos2, vec2};
 use rundell_interpreter::form_registry::{Position, TextAlign};
 use crate::form_runtime::{hex_to_color32, GuiEvent};
 
@@ -14,6 +14,8 @@ pub fn render(
     value: &mut String,
     text_color: &str,
     _text_background: &str,
+    font: &str,
+    font_size: u32,
     readonly: bool,
     placeholder: &str,
     text_align: TextAlign,
@@ -30,6 +32,7 @@ pub fn render(
             let mut edit = TextEdit::singleline(&mut text)
                 .desired_width(position.width as f32)
                 .hint_text(placeholder)
+                .font(font_id(font, font_size))
                 .horizontal_align(align_from_text_align(text_align));
             if readonly {
                 edit = edit.interactive(false);
@@ -58,4 +61,14 @@ fn align_from_text_align(text_align: TextAlign) -> Align {
         TextAlign::Center => Align::Center,
         TextAlign::Right => Align::Max,
     }
+}
+
+fn font_id(font: &str, font_size: u32) -> FontId {
+    let trimmed = font.trim();
+    let family = match trimmed.to_ascii_lowercase().as_str() {
+        "" | "default" | "proportional" => egui::FontFamily::Proportional,
+        "monospace" => egui::FontFamily::Monospace,
+        _ => egui::FontFamily::Name(trimmed.into()),
+    };
+    FontId::new(font_size as f32, family)
 }

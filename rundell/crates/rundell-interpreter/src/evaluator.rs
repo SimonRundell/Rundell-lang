@@ -7,9 +7,10 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use rundell_parser::ast::{
-    BinOp, CmpOp, DefineStmt, DialogCall, Expr, ForEachStmt, ForLoopStmt,
+    BinOp, CmpOp, DefineStmt, DialogCall, EventTimerDefinition, Expr, ForEachStmt, ForLoopStmt,
     FormDefinition, FunctionDefStmt, IfStmt, Literal, ReceiveStmt, RundellType,
     SetOp, SetStmt, SetTarget, Stmt, SwitchPattern, TryCatchStmt, UnaryOp, WhileLoopStmt,
 };
@@ -53,6 +54,31 @@ pub struct QueryRegistry {
 #[derive(Debug, Default)]
 pub struct CredentialsRegistry {
     pub credentials: HashMap<String, CredentialsInstance>,
+}
+
+// ---------------------------------------------------------------------------
+// Event timers
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct EventTimer {
+    interval_ms: u64,
+    running: bool,
+    on_event: Option<String>,
+    next_fire: Option<Instant>,
+    in_callback: bool,
+}
+
+impl Default for EventTimer {
+    fn default() -> Self {
+        EventTimer {
+            interval_ms: 0,
+            running: false,
+            on_event: None,
+            next_fire: None,
+            in_callback: false,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +207,8 @@ pub struct Interpreter {
     pub query_registry: QueryRegistry,
     /// Registry of resolved credentials instances.
     pub credentials_registry: CredentialsRegistry,
+    /// Registry of named event timers.
+    event_timers: HashMap<String, EventTimer>,
 }
 
 impl Default for Interpreter {
@@ -208,6 +236,7 @@ impl Interpreter {
             rt: tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime"),
             query_registry: QueryRegistry::default(),
             credentials_registry: CredentialsRegistry::default(),
+            event_timers: HashMap::new(),
         }
     }
 
@@ -229,6 +258,7 @@ impl Interpreter {
             rt: tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime"),
             query_registry: QueryRegistry::default(),
             credentials_registry: CredentialsRegistry::default(),
+            event_timers: HashMap::new(),
         }
     }
 
@@ -250,6 +280,7 @@ impl Interpreter {
             self.exec_stmt(stmt)?;
         }
         self.wait_for_open_forms()?;
+        self.wait_for_timers()?;
         Ok(())
     }
 
@@ -293,6 +324,7 @@ impl Interpreter {
                 Ok(())
             }
             Stmt::FormDef(fd) => self.exec_form_def(fd),
+            Stmt::EventTimerDef(def) => self.exec_eventtimer_def(def),
             Stmt::DefineControl(name, _ctrl_type) => {
                 // DefineControl outside a form body — log a warning and continue.
                 eprintln!("[WARN] DefineControl '{}' outside form body — ignored", name);
@@ -994,6 +1026,7 @@ impl Interpreter {
             Expr::JsonLiteral(v) => Ok(Value::Json(v)),
             Expr::ObjectPath(segs) => self.eval_object_path(segs),
             Expr::PixelValue(n) => Ok(Value::Integer(n as i64)),
+            Expr::DurationValue(ms) => Ok(Value::Integer(ms as i64)),
             Expr::PositionLiteral(top, left, width, height) => {
                 Ok(Value::Json(serde_json::json!([top, left, width, height])))
             }
@@ -1653,6 +1686,27 @@ impl Interpreter {
         Ok(())
     }
 
+    /// Execute an event timer definition: register and configure the timer.
+    fn exec_eventtimer_def(&mut self, def: EventTimerDefinition) -> Result<(), RuntimeError> {
+        let name = def.name.clone();
+        self.event_timers.insert(name.clone(), EventTimer::default());
+        for stmt in def.body {
+            self.exec_eventtimer_stmt(&name, stmt)?;
+        }
+        Ok(())
+    }
+
+    /// Execute a statement inside an event timer definition body.
+    fn exec_eventtimer_stmt(&mut self, _timer_name: &str, stmt: Stmt) -> Result<(), RuntimeError> {
+        match stmt {
+            Stmt::Set(set_stmt) => match set_stmt.target {
+                SetTarget::ObjectPath(path) => self.exec_set_object_path(path, set_stmt.op),
+                _ => self.exec_set(set_stmt),
+            },
+            other => self.exec_stmt(other),
+        }
+    }
+
     /// Execute a statement inside a form definition body.
     fn exec_form_stmt(&mut self, form_name: &str, stmt: Stmt) -> Result<(), RuntimeError> {
         match stmt {
@@ -1681,6 +1735,15 @@ impl Interpreter {
         // Evaluate the value first (before mutably borrowing root_window).
         let value = match op {
             SetOp::Assign(expr) => {
+                if let Some((timer_name, prop)) = self.timer_path_parts(&path) {
+                    if prop == "event" {
+                        if let Expr::Call(name, args) = &expr {
+                            if args.is_empty() {
+                                return self.set_timer_property(&timer_name, &prop, Value::Str(name.clone()));
+                            }
+                        }
+                    }
+                }
                 if let Expr::Call(name, args) = &expr {
                     if args.is_empty() && is_event_path(&path) {
                         Value::Str(name.clone())
@@ -1721,7 +1784,8 @@ impl Interpreter {
                 })
             } else if first != "rootWindow" {
                 if let Some(ref fname) = self.current_form_name {
-                    if !self.root_window.forms.contains_key(first) {
+                    if !self.root_window.forms.contains_key(first)
+                        && !self.event_timers.contains_key(first) {
                         Some(std::iter::once(fname.clone())
                             .chain(path.iter().cloned())
                             .collect())
@@ -1730,6 +1794,10 @@ impl Interpreter {
             } else { None }
         };
         let effective_path: &[String] = expanded.as_deref().unwrap_or(path);
+
+        if let Some((timer_name, prop)) = self.timer_path_parts(effective_path) {
+            return self.set_timer_property(&timer_name, &prop, value);
+        }
 
         let (form_name, rest) = self.resolve_path_root(effective_path)?;
 
@@ -1825,7 +1893,8 @@ impl Interpreter {
                 })
             } else if first != "rootWindow" {
                 if let Some(ref fname) = self.current_form_name {
-                    if !self.root_window.forms.contains_key(first) {
+                    if !self.root_window.forms.contains_key(first)
+                        && !self.event_timers.contains_key(first) {
                         Some(std::iter::once(fname.clone())
                             .chain(path.iter().cloned())
                             .collect())
@@ -1834,6 +1903,10 @@ impl Interpreter {
             } else { None }
         };
         let effective_path: &[String] = expanded.as_deref().unwrap_or(&path);
+
+        if let Some((timer_name, prop)) = self.timer_path_parts(effective_path) {
+            return self.eval_timer_property(&timer_name, &prop);
+        }
 
         let (form_name, rest) = self.resolve_path_root(effective_path)?;
 
@@ -1930,7 +2003,10 @@ impl Interpreter {
                     Some(crate::gui_channel::GuiResponse::EventFired { form, control, event, value }) => {
                         let _ = self.dispatch_event(&form, &control, &event, value);
                     }
-                    None => std::thread::sleep(std::time::Duration::from_millis(10)),
+                    None => {
+                        self.pump_timers()?;
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
                     _ => {}
                 }
             }
@@ -1960,6 +2036,7 @@ impl Interpreter {
                 crate::gui_channel::GuiResponse::Ready => {}
             }
         }
+        self.pump_timers()?;
         Ok(())
     }
 
@@ -1969,7 +2046,130 @@ impl Interpreter {
         }
         while self.root_window.forms.values().any(|f| f.is_open) {
             self.pump_gui_events()?;
+            self.pump_timers()?;
             std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        Ok(())
+    }
+
+    fn wait_for_timers(&mut self) -> Result<(), RuntimeError> {
+        if self.gui_rx.is_some() {
+            return Ok(());
+        }
+        while self.has_active_timers() {
+            self.pump_timers()?;
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        Ok(())
+    }
+
+    fn has_active_timers(&self) -> bool {
+        self.event_timers
+            .values()
+            .any(|timer| timer.running && timer.interval_ms > 0)
+    }
+
+    fn pump_timers(&mut self) -> Result<(), RuntimeError> {
+        if self.event_timers.is_empty() {
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        let due: Vec<(String, Option<String>)> = self
+            .event_timers
+            .iter()
+            .filter(|(_, timer)| timer.running && timer.interval_ms > 0 && !timer.in_callback)
+            .filter(|(_, timer)| timer.next_fire.map_or(true, |t| now >= t))
+            .map(|(name, timer)| (name.clone(), timer.on_event.clone()))
+            .collect();
+
+        for (name, callback) in due {
+            if let Some(timer) = self.event_timers.get_mut(&name) {
+                if timer.in_callback {
+                    continue;
+                }
+                timer.in_callback = true;
+                if timer.running && timer.interval_ms > 0 {
+                    timer.next_fire = Some(Instant::now() + Duration::from_millis(timer.interval_ms));
+                }
+            }
+            if let Some(handler) = callback {
+                let _ = self.call_function(&handler, vec![])?;
+            }
+            if let Some(timer) = self.event_timers.get_mut(&name) {
+                timer.in_callback = false;
+                if !timer.running || timer.interval_ms == 0 {
+                    timer.next_fire = None;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn timer_path_parts(&self, path: &[String]) -> Option<(String, String)> {
+        if path.len() == 2 {
+            let name = path[0].clone();
+            let prop = path[1].clone();
+            if self.event_timers.contains_key(&name) {
+                return Some((name, prop));
+            }
+        }
+        None
+    }
+
+    fn eval_timer_property(&self, timer_name: &str, prop: &str) -> Result<Value, RuntimeError> {
+        let timer = self.event_timers.get(timer_name).ok_or_else(|| {
+            RuntimeError::RuntimeError(format!("no eventtimer named '{timer_name}'"))
+        })?;
+        let val = match prop {
+            "interval" => timer.interval_ms.to_string(),
+            "running" => timer.running.to_string(),
+            "event" => timer.on_event.clone().unwrap_or_default(),
+            _ => {
+                return Err(RuntimeError::RuntimeError(
+                    format!("no property '{}' on eventtimer '{}'", prop, timer_name)
+                ));
+            }
+        };
+        Ok(Value::Str(val))
+    }
+
+    fn set_timer_property(&mut self, timer_name: &str, prop: &str, value: Value) -> Result<(), RuntimeError> {
+        let timer = self.event_timers.get_mut(timer_name).ok_or_else(|| {
+            RuntimeError::RuntimeError(format!("no eventtimer named '{timer_name}'"))
+        })?;
+
+        match prop {
+            "interval" => {
+                let interval_ms = parse_duration_ms(&value)?;
+                timer.interval_ms = interval_ms;
+                if timer.running && interval_ms > 0 {
+                    timer.next_fire = Some(Instant::now() + Duration::from_millis(interval_ms));
+                } else {
+                    timer.next_fire = None;
+                }
+            }
+            "running" => {
+                let running = parse_bool_value(&value)?;
+                timer.running = running;
+                if running && timer.interval_ms > 0 {
+                    timer.next_fire = Some(Instant::now() + Duration::from_millis(timer.interval_ms));
+                } else {
+                    timer.next_fire = None;
+                }
+            }
+            "event" => {
+                let name = match value {
+                    Value::Str(s) => s,
+                    other => other.to_display_string(),
+                };
+                timer.on_event = if name.trim().is_empty() { None } else { Some(name) };
+            }
+            _ => {
+                return Err(RuntimeError::RuntimeError(
+                    format!("no property '{}' on eventtimer '{}'", prop, timer_name)
+                ));
+            }
         }
         Ok(())
     }
@@ -2532,6 +2732,66 @@ fn compare_values(a: &Value, op: &CmpOp, b: &Value) -> Result<bool, RuntimeError
 
 fn is_event_path(path: &[String]) -> bool {
     matches!(path.last().map(String::as_str), Some("click") | Some("change") | Some("select"))
+}
+
+fn parse_bool_value(value: &Value) -> Result<bool, RuntimeError> {
+    match value {
+        Value::Boolean(b) => Ok(*b),
+        Value::Integer(n) => Ok(*n != 0),
+        Value::Float(f) => Ok(*f != 0.0),
+        Value::Str(s) => match s.to_ascii_lowercase().as_str() {
+            "true" | "yes" | "1" => Ok(true),
+            "false" | "no" | "0" => Ok(false),
+            _ => Err(RuntimeError::TypeError(format!(
+                "cannot cast string '{s}' to boolean"
+            ))),
+        },
+        Value::Null => Ok(false),
+        other => Err(RuntimeError::TypeError(format!(
+            "cannot cast {} to boolean",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_duration_ms(value: &Value) -> Result<u64, RuntimeError> {
+    match value {
+        Value::Integer(n) if *n >= 0 => Ok(*n as u64),
+        Value::Float(f) if *f >= 0.0 => Ok(*f as u64),
+        Value::Str(s) => parse_duration_ms_str(s),
+        Value::Null => Ok(0),
+        other => Err(RuntimeError::TypeError(format!(
+            "cannot cast {} to duration",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_duration_ms_str(s: &str) -> Result<u64, RuntimeError> {
+    let trimmed = s.trim();
+    if let Some(num) = trimmed.strip_suffix("ms") {
+        return num.parse::<u64>().map_err(|_| RuntimeError::TypeError(
+            format!("invalid duration '{trimmed}'")
+        ));
+    }
+    if let Some(num) = trimmed.strip_suffix('s') {
+        return num.parse::<u64>().map(|n| n * 1_000).map_err(|_| RuntimeError::TypeError(
+            format!("invalid duration '{trimmed}'")
+        ));
+    }
+    if let Some(num) = trimmed.strip_suffix('m') {
+        return num.parse::<u64>().map(|n| n * 60_000).map_err(|_| RuntimeError::TypeError(
+            format!("invalid duration '{trimmed}'")
+        ));
+    }
+    if let Some(num) = trimmed.strip_suffix('h') {
+        return num.parse::<u64>().map(|n| n * 3_600_000).map_err(|_| RuntimeError::TypeError(
+            format!("invalid duration '{trimmed}'")
+        ));
+    }
+    trimmed.parse::<u64>().map_err(|_| RuntimeError::TypeError(
+        format!("invalid duration '{trimmed}'")
+    ))
 }
 
 fn apply_cmp<T: PartialOrd>(a: T, op: &CmpOp, b: T) -> bool {

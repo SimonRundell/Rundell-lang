@@ -1,6 +1,6 @@
 //! Dropdown select (ComboBox) control renderer.
 
-use egui::{Align, ComboBox, Context, Layout, Ui, pos2, vec2};
+use egui::{Align, ComboBox, Context, FontId, Layout, RichText, Ui, pos2, vec2};
 use rundell_interpreter::form_registry::{Position, TextAlign};
 use crate::form_runtime::GuiEvent;
 
@@ -13,6 +13,8 @@ pub fn render(
     position: &Position,
     items: &[String],
     selected_index: &mut Option<usize>,
+    font: &str,
+    font_size: u32,
     enabled: bool,
     text_align: TextAlign,
 ) -> Vec<GuiEvent> {
@@ -29,12 +31,14 @@ pub fn render(
             let layout = layout_from_text_align(text_align);
             ui.allocate_ui_with_layout(vec2(position.width as f32, position.height as f32), layout, |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
+                    let font_id = font_id(font, font_size);
                     let combo = ComboBox::from_id_source(format!("{form_name}_{ctrl_name}_combo"))
-                        .selected_text(&label)
+                        .selected_text(RichText::new(&label).font(font_id.clone()))
                         .width(position.width as f32);
                     combo.show_ui(ui, |ui: &mut egui::Ui| {
                         for (i, item) in items.iter().enumerate() {
-                            if ui.selectable_value(&mut current, i, item).clicked() {
+                            let item_text = RichText::new(item).font(font_id.clone());
+                            if ui.selectable_value(&mut current, i, item_text).clicked() {
                                 *selected_index = Some(current);
                                 let selected_text = items.get(current).cloned().unwrap_or_default();
                                 events.push(GuiEvent {
@@ -59,4 +63,14 @@ fn layout_from_text_align(text_align: TextAlign) -> Layout {
         TextAlign::Center => Layout::left_to_right(Align::Center),
         TextAlign::Right => Layout::left_to_right(Align::Max),
     }
+}
+
+fn font_id(font: &str, font_size: u32) -> FontId {
+    let trimmed = font.trim();
+    let family = match trimmed.to_ascii_lowercase().as_str() {
+        "" | "default" | "proportional" => egui::FontFamily::Proportional,
+        "monospace" => egui::FontFamily::Monospace,
+        _ => egui::FontFamily::Name(trimmed.into()),
+    };
+    FontId::new(font_size as f32, family)
 }

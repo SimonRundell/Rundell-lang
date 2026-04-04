@@ -192,6 +192,7 @@ fn stmt_uses_gui(stmt: &Stmt) -> bool {
         Stmt::Remove(expr) => expr_uses_gui(expr),
         Stmt::Append(expr, val) => expr_uses_gui(expr) || expr_uses_gui(val),
         Stmt::DefineControl(_, _) => true,
+        Stmt::EventTimerDef(def) => def.body.iter().any(stmt_uses_gui),
         Stmt::CredentialsDef(def) => {
             def.token.as_ref().map(expr_uses_gui).unwrap_or(false)
                 || def.authentication.as_ref().map(expr_uses_gui).unwrap_or(false)
@@ -224,7 +225,7 @@ fn expr_uses_gui(expr: &Expr) -> bool {
 
 /// Start the interactive REPL.
 fn run_repl() {
-    println!("Rundell 0.1.0  \u{2014}  type 'exit' or Ctrl+D to quit");
+    println!("Rundell 0.1.4  \u{2014}  type 'exit' or Ctrl+D to quit");
 
     let mut rl = DefaultEditor::new().unwrap_or_else(|e| {
         eprintln!("Failed to initialise readline: {e}");

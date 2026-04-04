@@ -1,0 +1,20 @@
+# timer_basic.run
+# A simple event timer example (headless or GUI).
+
+define ticks as integer = 0.
+
+define myTimer as eventtimer -->
+    set myTimer\interval = 1s.
+    set myTimer\event = onTick().
+<--
+
+define onTick() returns null -->
+    set ticks = ticks + 1.
+    print "Tick " + string(ticks) + newline().
+    if (ticks >= 3) -->
+        set myTimer\running = false.
+    <--
+    return null.
+<--
+
+set myTimer\running = true.

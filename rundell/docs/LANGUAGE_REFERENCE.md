@@ -576,6 +576,8 @@ No events.
 | `value` | string | `""` |
 | `textcolor` | string | `"#000000"` |
 | `textbackground` | string | `"#FFFFFF"` |
+| `font` | string | `"default"` |
+| `fontsize` | integer | `12` |
 | `textalign` | enum (`left`, `center`, `right`) | `left` |
 | `readonly` | boolean | `false` |
 | `maxlength` | integer | (none) |
@@ -591,6 +593,8 @@ Events: `change` (fires on each keystroke).
 | `caption` | string | `""` |
 | `textcolor` | string | `"#000000"` |
 | `backgroundcolor` | string | `"#E0E0E0"` |
+| `font` | string | `"default"` |
+| `fontsize` | integer | `12` |
 | `textalign` | enum (`left`, `center`, `right`) | `center` |
 
 Events: `click`.
@@ -602,6 +606,8 @@ Events: `click`.
 | `caption` | string | `""` |
 | `group` | string | `""` |
 | `checked` | boolean | `false` |
+| `font` | string | `"default"` |
+| `fontsize` | integer | `12` |
 | `textalign` | enum (`left`, `center`, `right`) | `left` |
 
 Radio buttons sharing the same `group` are mutually exclusive — setting one to `checked = true` automatically clears the others.
@@ -614,6 +620,8 @@ Events: `change`.
 |---|---|---|
 | `caption` | string | `""` |
 | `checked` | boolean | `false` |
+| `font` | string | `"default"` |
+| `fontsize` | integer | `12` |
 | `textalign` | enum (`left`, `center`, `right`) | `left` |
 
 Events: `change`.
@@ -626,6 +634,8 @@ Rendered as a toggle button. `checked = true` represents On/Yes.
 |---|---|---|
 | `caption` | string | `""` |
 | `checked` | boolean | `false` |
+| `font` | string | `"default"` |
+| `fontsize` | integer | `12` |
 | `textalign` | enum (`left`, `center`, `right`) | `left` |
 
 Events: `change`.
@@ -636,6 +646,8 @@ Events: `change`.
 |---|---|---|---|
 | `items` | json array or csv | `[]` | `["A", "B"]` or `"A, B"` |
 | `value` | string | (none) | The currently selected item text (read) |
+| `font` | string | `"default"` | Text font family |
+| `fontsize` | integer | `12` | Text size in pixels |
 | `textalign` | enum (`left`, `center`, `right`) | `left` | Align selected text |
 
 Events: `change`.
@@ -647,12 +659,41 @@ Events: `change`.
 | `datasource` | json | `null` | Array variable. Rows from `"rows"`, `"records"`, or top-level array. |
 | `columns` | json array | `[]` | Field names to display as columns |
 | `imagecolumn` | string | `""` | Field whose value is a base64-encoded PNG/JPEG |
+| `font` | string | `"default"` | Row text font family |
+| `fontsize` | integer | `12` | Row text size in pixels |
 | `multiselect` | boolean | `false` | Allow multiple row selection |
 | `value` | json | `null` | Selected record(s) as json (read) |
 | `rowheight` | integer | `24` | Row height in pixels |
 | `headervisible` | boolean | `true` | Show column headers |
 
 Events: `change` (selection changes), `select` (row double-clicked).
+
+#### eventtimer
+
+Defines a named timer that can invoke a callback at a fixed interval while
+`running = true`.
+
+| Property | Type | Default | Notes |
+|---|---|---|---|
+| `interval` | duration | `0` | `500ms`, `2s`, `1m`, `1h` (no spaces) |
+| `running` | boolean | `false` | Starts the timer when `true` |
+| `event` | function | (none) | Callback function (zero args, returns null) |
+
+Example:
+
+```
+define myTimer as eventtimer -->
+    set myTimer\interval = 10s.
+    set myTimer\event = myCallback().
+<--
+
+define myCallback() returns null -->
+    print "Timer fired" + newline().
+    return null.
+<--
+
+set myTimer\running = true.
+```
 
 ---
 

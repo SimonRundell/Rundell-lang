@@ -1,6 +1,6 @@
 //! Listbox (data-bound multi-column list) control renderer.
 
-use egui::{Context, ScrollArea, Ui, pos2, vec2};
+use egui::{Context, FontId, RichText, ScrollArea, Ui, pos2, vec2};
 use rundell_interpreter::form_registry::Position;
 use crate::form_runtime::GuiEvent;
 
@@ -20,6 +20,8 @@ pub fn render(
     row_height: u32,
     header_visible: bool,
     selected_indices: &mut Vec<usize>,
+    font: &str,
+    font_size: u32,
     enabled: bool,
 ) -> Vec<GuiEvent> {
     let id = egui::Id::new(format!("{form_name}_{ctrl_name}"));
@@ -47,13 +49,14 @@ pub fn render(
         .show(ctx, |ui| {
             ui.set_min_size(vec2(position.width as f32, position.height as f32));
             ui.add_enabled_ui(enabled, |ui| {
+                let font_id = font_id(font, font_size);
                 egui::Frame::none()
                     .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
                     .show(ui, |ui| {
                         if header_visible && !columns.is_empty() {
                             ui.horizontal(|ui| {
                                 for col in columns {
-                                    ui.label(egui::RichText::new(col).strong());
+                                    ui.label(RichText::new(col).strong().font(font_id.clone()));
                                     ui.separator();
                                 }
                             });
@@ -93,7 +96,8 @@ pub fn render(
                                                 .join("  |  ")
                                         };
 
-                                        let resp = ui.selectable_label(is_selected, &row_text);
+                                        let row_label = RichText::new(&row_text).font(font_id.clone());
+                                        let resp = ui.selectable_label(is_selected, row_label);
                                         if resp.clicked() {
                                             selected_indices.clear();
                                             selected_indices.push(row_idx);
@@ -120,4 +124,14 @@ pub fn render(
         });
 
     events
+}
+
+fn font_id(font: &str, font_size: u32) -> FontId {
+    let trimmed = font.trim();
+    let family = match trimmed.to_ascii_lowercase().as_str() {
+        "" | "default" | "proportional" => egui::FontFamily::Proportional,
+        "monospace" => egui::FontFamily::Monospace,
+        _ => egui::FontFamily::Name(trimmed.into()),
+    };
+    FontId::new(font_size as f32, family)
 }

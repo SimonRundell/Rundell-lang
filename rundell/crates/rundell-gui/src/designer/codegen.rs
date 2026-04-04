@@ -87,12 +87,15 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
     ));
 
     match state {
-        ControlState::Label { value, text_color, font_size, text_align, .. } => {
+        ControlState::Label { value, text_color, font, font_size, text_align, .. } => {
             if !value.is_empty() {
                 lines.push(format!("    set {}\\value = \"{value}\".", name));
             }
             if text_color != "#000000" {
                 lines.push(format!("    set {}\\textcolor = \"{text_color}\".", name));
+            }
+            if font != "default" {
+                lines.push(format!("    set {}\\font = \"{font}\".", name));
             }
             if *font_size != 12 {
                 lines.push(format!("    set {}\\fontsize = {font_size}.", name));
@@ -101,7 +104,7 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
                 lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
             }
         }
-        ControlState::Textbox { value, placeholder, readonly, text_color, text_align, .. } => {
+        ControlState::Textbox { value, placeholder, readonly, text_color, font, font_size, text_align, .. } => {
             if !value.is_empty() {
                 lines.push(format!("    set {}\\value = \"{value}\".", name));
             }
@@ -114,11 +117,17 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
             if text_color != "#000000" {
                 lines.push(format!("    set {}\\textcolor = \"{text_color}\".", name));
             }
+            if font != "default" {
+                lines.push(format!("    set {}\\font = \"{font}\".", name));
+            }
+            if *font_size != 12 {
+                lines.push(format!("    set {}\\fontsize = {font_size}.", name));
+            }
             if *text_align != TextAlign::Left {
                 lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
             }
         }
-        ControlState::Button { caption, text_color, background_color, text_align, .. } => {
+        ControlState::Button { caption, text_color, background_color, font, font_size, text_align, .. } => {
             if !caption.is_empty() {
                 lines.push(format!("    set {}\\caption = \"{caption}\".", name));
             }
@@ -128,11 +137,17 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
             if background_color != "#E0E0E0" {
                 lines.push(format!("    set {}\\backgroundcolor = \"{background_color}\".", name));
             }
+            if font != "default" {
+                lines.push(format!("    set {}\\font = \"{font}\".", name));
+            }
+            if *font_size != 12 {
+                lines.push(format!("    set {}\\fontsize = {font_size}.", name));
+            }
             if *text_align != TextAlign::Center {
                 lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
             }
         }
-        ControlState::Radiobutton { caption, group, checked, text_align, .. } => {
+        ControlState::Radiobutton { caption, group, checked, font, font_size, text_align, .. } => {
             if !caption.is_empty() {
                 lines.push(format!("    set {}\\caption = \"{caption}\".", name));
             }
@@ -142,44 +157,77 @@ fn emit_properties(lines: &mut Vec<String>, name: &str, state: &ControlState) {
             if *checked {
                 lines.push(format!("    set {}\\checked = true.", name));
             }
+            if font != "default" {
+                lines.push(format!("    set {}\\font = \"{font}\".", name));
+            }
+            if *font_size != 12 {
+                lines.push(format!("    set {}\\fontsize = {font_size}.", name));
+            }
             if *text_align != TextAlign::Left {
                 lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
             }
         }
-        ControlState::Checkbox { caption, checked, text_align, .. } => {
+        ControlState::Checkbox { caption, checked, font, font_size, text_align, .. } => {
             if !caption.is_empty() {
                 lines.push(format!("    set {}\\caption = \"{caption}\".", name));
             }
             if *checked {
                 lines.push(format!("    set {}\\checked = true.", name));
             }
+            if font != "default" {
+                lines.push(format!("    set {}\\font = \"{font}\".", name));
+            }
+            if *font_size != 12 {
+                lines.push(format!("    set {}\\fontsize = {font_size}.", name));
+            }
             if *text_align != TextAlign::Left {
                 lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
             }
         }
-        ControlState::Switch { caption, checked, text_align, .. } => {
+        ControlState::Switch { caption, checked, font, font_size, text_align, .. } => {
             if !caption.is_empty() {
                 lines.push(format!("    set {}\\caption = \"{caption}\".", name));
             }
             if *checked {
                 lines.push(format!("    set {}\\checked = true.", name));
             }
+            if font != "default" {
+                lines.push(format!("    set {}\\font = \"{font}\".", name));
+            }
+            if *font_size != 12 {
+                lines.push(format!("    set {}\\fontsize = {font_size}.", name));
+            }
             if *text_align != TextAlign::Left {
                 lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
             }
         }
-        ControlState::Select { text_align, .. } => {
-            // Items are typically set via code, not in the designer.
+        ControlState::Select { items, font, font_size, text_align, .. } => {
+            if !items.is_empty() {
+                let csv = items.join(", ");
+                lines.push(format!("    set {}\\items = \"{csv}\".", name));
+            }
+            if font != "default" {
+                lines.push(format!("    set {}\\font = \"{font}\".", name));
+            }
+            if *font_size != 12 {
+                lines.push(format!("    set {}\\fontsize = {font_size}.", name));
+            }
             if *text_align != TextAlign::Left {
                 lines.push(format!("    set {}\\textalign = \"{}\".", name, text_align.as_str()));
             }
         }
-        ControlState::Listbox { columns, multi_select, row_height, header_visible, .. } => {
+        ControlState::Listbox { columns, multi_select, row_height, header_visible, font, font_size, .. } => {
             if !columns.is_empty() {
                 let arr: serde_json::Value = serde_json::Value::Array(
                     columns.iter().map(|c| serde_json::Value::String(c.clone())).collect()
                 );
                 lines.push(format!("    set {}\\columns = {}.", name, arr));
+            }
+            if font != "default" {
+                lines.push(format!("    set {}\\font = \"{font}\".", name));
+            }
+            if *font_size != 12 {
+                lines.push(format!("    set {}\\fontsize = {font_size}.", name));
             }
             if *multi_select {
                 lines.push(format!("    set {}\\multiselect = true.", name));

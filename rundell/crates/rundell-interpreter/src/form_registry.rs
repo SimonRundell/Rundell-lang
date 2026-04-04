@@ -69,6 +69,8 @@ pub enum ControlState {
         position: Position,
         text_color: String,
         text_background: String,
+        font: String,
+        font_size: u32,
         text_align: TextAlign,
         readonly: bool,
         max_length: Option<u32>,
@@ -83,6 +85,8 @@ pub enum ControlState {
         position: Position,
         text_color: String,
         background_color: String,
+        font: String,
+        font_size: u32,
         text_align: TextAlign,
         on_click: Option<String>,
     },
@@ -93,6 +97,8 @@ pub enum ControlState {
         visible: bool,
         enabled: bool,
         position: Position,
+        font: String,
+        font_size: u32,
         text_align: TextAlign,
         on_change: Option<String>,
     },
@@ -102,6 +108,8 @@ pub enum ControlState {
         visible: bool,
         enabled: bool,
         position: Position,
+        font: String,
+        font_size: u32,
         text_align: TextAlign,
         on_change: Option<String>,
     },
@@ -111,6 +119,8 @@ pub enum ControlState {
         visible: bool,
         enabled: bool,
         position: Position,
+        font: String,
+        font_size: u32,
         text_align: TextAlign,
         on_change: Option<String>,
     },
@@ -120,6 +130,8 @@ pub enum ControlState {
         visible: bool,
         enabled: bool,
         position: Position,
+        font: String,
+        font_size: u32,
         text_align: TextAlign,
         on_change: Option<String>,
     },
@@ -132,6 +144,8 @@ pub enum ControlState {
         visible: bool,
         enabled: bool,
         position: Position,
+        font: String,
+        font_size: u32,
         row_height: u32,
         header_visible: bool,
         on_change: Option<String>,
@@ -163,11 +177,14 @@ impl ControlState {
                 }
             }
             ControlState::Textbox { value: v, text_color, text_background, readonly,
-                max_length, placeholder, autorefresh, on_change, text_align, visible, enabled, .. } => {
+                max_length, placeholder, autorefresh, on_change, font, font_size,
+                text_align, visible, enabled, .. } => {
                 match prop {
                     "value" => *v = value.to_string(),
                     "textcolor" => *text_color = value.to_string(),
                     "textbackground" => *text_background = value.to_string(),
+                    "font" => *font = value.to_string(),
+                    "fontsize" => *font_size = value.parse().unwrap_or(*font_size),
                     "textalign" => {
                         *text_align = TextAlign::parse(value)
                             .ok_or_else(|| format!(
@@ -185,11 +202,14 @@ impl ControlState {
                     _ => return Err(format!("[WARN] unrecognised property '{}' on textbox", prop)),
                 }
             }
-            ControlState::Button { caption, text_color, background_color, text_align, on_click, visible, enabled, .. } => {
+            ControlState::Button { caption, text_color, background_color, font, font_size,
+                text_align, on_click, visible, enabled, .. } => {
                 match prop {
                     "caption" => *caption = value.to_string(),
                     "textcolor" => *text_color = value.to_string(),
                     "backgroundcolor" => *background_color = value.to_string(),
+                    "font" => *font = value.to_string(),
+                    "fontsize" => *font_size = value.parse().unwrap_or(*font_size),
                     "textalign" => {
                         *text_align = TextAlign::parse(value)
                             .ok_or_else(|| format!(
@@ -203,11 +223,14 @@ impl ControlState {
                     _ => return Err(format!("[WARN] unrecognised property '{}' on button", prop)),
                 }
             }
-            ControlState::Radiobutton { caption, group, checked, on_change, text_align, visible, enabled, .. } => {
+            ControlState::Radiobutton { caption, group, checked, on_change, font, font_size,
+                text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => *caption = value.to_string(),
                     "group" => *group = value.to_string(),
                     "checked" => *checked = value == "true",
+                    "font" => *font = value.to_string(),
+                    "fontsize" => *font_size = value.parse().unwrap_or(*font_size),
                     "textalign" => {
                         *text_align = TextAlign::parse(value)
                             .ok_or_else(|| format!(
@@ -221,10 +244,13 @@ impl ControlState {
                     _ => return Err(format!("[WARN] unrecognised property '{}' on radiobutton", prop)),
                 }
             }
-            ControlState::Checkbox { caption, checked, on_change, text_align, visible, enabled, .. } => {
+            ControlState::Checkbox { caption, checked, on_change, font, font_size,
+                text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => *caption = value.to_string(),
                     "checked" => *checked = value == "true",
+                    "font" => *font = value.to_string(),
+                    "fontsize" => *font_size = value.parse().unwrap_or(*font_size),
                     "textalign" => {
                         *text_align = TextAlign::parse(value)
                             .ok_or_else(|| format!(
@@ -238,10 +264,13 @@ impl ControlState {
                     _ => return Err(format!("[WARN] unrecognised property '{}' on checkbox", prop)),
                 }
             }
-            ControlState::Switch { caption, checked, on_change, text_align, visible, enabled, .. } => {
+            ControlState::Switch { caption, checked, on_change, font, font_size,
+                text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => *caption = value.to_string(),
                     "checked" => *checked = value == "true",
+                    "font" => *font = value.to_string(),
+                    "fontsize" => *font_size = value.parse().unwrap_or(*font_size),
                     "textalign" => {
                         *text_align = TextAlign::parse(value)
                             .ok_or_else(|| format!(
@@ -255,7 +284,8 @@ impl ControlState {
                     _ => return Err(format!("[WARN] unrecognised property '{}' on switch", prop)),
                 }
             }
-            ControlState::Select { items, selected_index, on_change, text_align, visible, enabled, .. } => {
+            ControlState::Select { items, selected_index, on_change, font, font_size,
+                text_align, visible, enabled, .. } => {
                 match prop {
                     "items" => {
                         // Try to parse as JSON array; fall back to csv
@@ -270,6 +300,8 @@ impl ControlState {
                     "value" => {
                         *selected_index = items.iter().position(|s| s == value);
                     }
+                    "font" => *font = value.to_string(),
+                    "fontsize" => *font_size = value.parse().unwrap_or(*font_size),
                     "textalign" => {
                         *text_align = TextAlign::parse(value)
                             .ok_or_else(|| format!(
@@ -284,7 +316,8 @@ impl ControlState {
                 }
             }
             ControlState::Listbox { data_source, columns, image_column, multi_select,
-                row_height, header_visible, on_change, on_select, visible, enabled, .. } => {
+                row_height, header_visible, on_change, on_select, font, font_size,
+                visible, enabled, .. } => {
                 match prop {
                     "datasource" => {
                         *data_source = serde_json::from_str(value).ok();
@@ -297,6 +330,8 @@ impl ControlState {
                         }
                     }
                     "imagecolumn" => *image_column = if value.is_empty() { None } else { Some(value.to_string()) },
+                    "font" => *font = value.to_string(),
+                    "fontsize" => *font_size = value.parse().unwrap_or(*font_size),
                     "multiselect" => *multi_select = value == "true",
                     "rowheight" => *row_height = value.parse().unwrap_or(*row_height),
                     "headervisible" => *header_visible = value == "true",
@@ -345,11 +380,14 @@ impl ControlState {
                 }
             }
             ControlState::Textbox { value, text_color, text_background, readonly,
-                max_length, placeholder, autorefresh, text_align, visible, enabled, .. } => {
+                max_length, placeholder, autorefresh, font, font_size,
+                text_align, visible, enabled, .. } => {
                 match prop {
                     "value" => Some(value.clone()),
                     "textcolor" => Some(text_color.clone()),
                     "textbackground" => Some(text_background.clone()),
+                    "font" => Some(font.clone()),
+                    "fontsize" => Some(font_size.to_string()),
                     "textalign" => Some(text_align.as_str().to_string()),
                     "readonly" => Some(readonly.to_string()),
                     "maxlength" => max_length.map(|n| n.to_string()),
@@ -360,51 +398,63 @@ impl ControlState {
                     _ => None,
                 }
             }
-            ControlState::Button { caption, text_color, background_color, text_align, visible, enabled, .. } => {
+            ControlState::Button { caption, text_color, background_color, font, font_size,
+                text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => Some(caption.clone()),
                     "textcolor" => Some(text_color.clone()),
                     "backgroundcolor" => Some(background_color.clone()),
+                    "font" => Some(font.clone()),
+                    "fontsize" => Some(font_size.to_string()),
                     "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
                     _ => None,
                 }
             }
-            ControlState::Radiobutton { caption, group, checked, text_align, visible, enabled, .. } => {
+            ControlState::Radiobutton { caption, group, checked, font, font_size,
+                text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => Some(caption.clone()),
                     "group" => Some(group.clone()),
                     "checked" => Some(checked.to_string()),
+                    "font" => Some(font.clone()),
+                    "fontsize" => Some(font_size.to_string()),
                     "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
                     _ => None,
                 }
             }
-            ControlState::Checkbox { caption, checked, text_align, visible, enabled, .. } => {
+            ControlState::Checkbox { caption, checked, font, font_size, text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => Some(caption.clone()),
                     "checked" => Some(checked.to_string()),
+                    "font" => Some(font.clone()),
+                    "fontsize" => Some(font_size.to_string()),
                     "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
                     _ => None,
                 }
             }
-            ControlState::Switch { caption, checked, text_align, visible, enabled, .. } => {
+            ControlState::Switch { caption, checked, font, font_size, text_align, visible, enabled, .. } => {
                 match prop {
                     "caption" => Some(caption.clone()),
                     "checked" => Some(checked.to_string()),
+                    "font" => Some(font.clone()),
+                    "fontsize" => Some(font_size.to_string()),
                     "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
                     _ => None,
                 }
             }
-            ControlState::Select { items, selected_index, text_align, visible, enabled, .. } => {
+            ControlState::Select { items, selected_index, font, font_size, text_align, visible, enabled, .. } => {
                 match prop {
                     "value" => selected_index.and_then(|i| items.get(i)).cloned(),
+                    "font" => Some(font.clone()),
+                    "fontsize" => Some(font_size.to_string()),
                     "textalign" => Some(text_align.as_str().to_string()),
                     "visible" => Some(visible.to_string()),
                     "enabled" => Some(enabled.to_string()),
@@ -412,13 +462,15 @@ impl ControlState {
                 }
             }
             ControlState::Listbox { data_source, columns, image_column, multi_select,
-                row_height, header_visible, visible, enabled, selected_indices, .. } => {
+                row_height, header_visible, font, font_size, visible, enabled, selected_indices, .. } => {
                 match prop {
                     "datasource" => data_source.as_ref().map(|v| v.to_string()),
                     "columns" => Some(serde_json::Value::Array(
                         columns.iter().map(|s| serde_json::Value::String(s.clone())).collect()
                     ).to_string()),
                     "imagecolumn" => image_column.clone().or(Some(String::new())),
+                    "font" => Some(font.clone()),
+                    "fontsize" => Some(font_size.to_string()),
                     "multiselect" => Some(multi_select.to_string()),
                     "rowheight" => Some(row_height.to_string()),
                     "headervisible" => Some(header_visible.to_string()),
@@ -475,6 +527,8 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             position: Position::default(),
             text_color: "#000000".to_string(),
             text_background: "#FFFFFF".to_string(),
+            font: "default".to_string(),
+            font_size: 12,
             text_align: TextAlign::Left,
             readonly: false,
             max_length: None,
@@ -489,6 +543,8 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             position: Position::default(),
             text_color: "#000000".to_string(),
             background_color: "#E0E0E0".to_string(),
+            font: "default".to_string(),
+            font_size: 12,
             text_align: TextAlign::Center,
             on_click: None,
         },
@@ -499,6 +555,8 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             visible: true,
             enabled: true,
             position: Position::default(),
+            font: "default".to_string(),
+            font_size: 12,
             text_align: TextAlign::Left,
             on_change: None,
         },
@@ -508,6 +566,8 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             visible: true,
             enabled: true,
             position: Position::default(),
+            font: "default".to_string(),
+            font_size: 12,
             text_align: TextAlign::Left,
             on_change: None,
         },
@@ -517,6 +577,8 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             visible: true,
             enabled: true,
             position: Position::default(),
+            font: "default".to_string(),
+            font_size: 12,
             text_align: TextAlign::Left,
             on_change: None,
         },
@@ -526,6 +588,8 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             visible: true,
             enabled: true,
             position: Position::default(),
+            font: "default".to_string(),
+            font_size: 12,
             text_align: TextAlign::Left,
             on_change: None,
         },
@@ -538,6 +602,8 @@ pub fn default_control_state(ctrl_type: &rundell_parser::ast::ControlType) -> Co
             visible: true,
             enabled: true,
             position: Position::default(),
+            font: "default".to_string(),
+            font_size: 12,
             row_height: 24,
             header_visible: true,
             on_change: None,

@@ -14,17 +14,18 @@ define tempForm as form -->
     set inputLbl\position  = 10px, 10px, 120px, 24px.
     set inputLbl\value     = "Temperature:".
 
-    set inputBox\position  = 130px, 10px, 120px, 28px.
+    set inputBox\position  = 10px, 130px, 120px, 28px.
     set inputBox\placeholder = "0.0".
 
-    set dirBox\position    = 10px, 50px, 240px, 28px.
-    set dirBox\options     = "Celsius to Fahrenheit,Fahrenheit to Celsius".
+    set dirBox\position    = 50px, 10px, 240px, 28px.
+    set dirBox\items       = "Celsius to Fahrenheit, Fahrenheit to Celsius".
+    set dirBox\value       = "Celsius to Fahrenheit".
 
-    set convertBtn\position = 10px, 90px, 120px, 30px.
+    set convertBtn\position = 90px, 10px, 120px, 30px.
     set convertBtn\caption  = "Convert".
     set convertBtn\click    = convert().
 
-    set outputLbl\position = 10px, 135px, 340px, 28px.
+    set outputLbl\position = 135px, 10px, 340px, 28px.
     set outputLbl\value    = "Result will appear here.".
 <--
 
@@ -34,7 +35,7 @@ define convert() returns null -->
     define res as string = "".
 
     try -->
-        define t as float = float(raw).
+        define t as float = cast(raw, float).
         if (dir == "Celsius to Fahrenheit") -->
             define f as float = t * 1.8 + 32.0.
             set res = string(t) + " °C  =  " + string(f) + " °F".

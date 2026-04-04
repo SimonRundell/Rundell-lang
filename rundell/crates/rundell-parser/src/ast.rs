@@ -117,6 +117,10 @@ pub enum Expr {
     /// A pixel dimension value parsed from e.g. `10px`.
     PixelValue(u32),
 
+    /// A duration value parsed from literals like `500ms`, `2s`, `1m`, `1h`.
+    /// Stored as milliseconds.
+    DurationValue(u64),
+
     /// A position literal: `top_px, left_px, width_px, height_px`.
     ///
     /// Used exclusively as the right-hand side of
@@ -379,6 +383,8 @@ pub enum Stmt {
     // -----------------------------------------------------------------
     /// `define name as form --> ... <--`
     FormDef(FormDefinition),
+    /// `define name as eventtimer --> ... <--`
+    EventTimerDef(EventTimerDefinition),
     /// `define name as form\controltype.`  (inside a form body)
     DefineControl(String, ControlType),
 
@@ -429,6 +435,19 @@ pub struct FormDefinition {
     /// The form's Rundell identifier (used as the key in `rootWindow.forms`).
     pub name: String,
     /// Statements inside the `define name as form --> ... <--` block.
+    pub body: Vec<Stmt>,
+}
+
+/// A named event timer definition block.
+///
+/// The `body` is a flat list of statements executed at registration time to
+/// configure the timer, typically `set <timer>\interval = ...` and
+/// `set <timer>\event = callback()`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventTimerDefinition {
+    /// The timer's identifier.
+    pub name: String,
+    /// Statements inside the `define name as eventtimer --> ... <--` block.
     pub body: Vec<Stmt>,
 }
 

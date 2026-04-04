@@ -585,6 +585,26 @@ rootWindow\myForm\show().
 
 ---
 
+## 16.1. Event Timers
+
+Event timers call a zero-argument callback on a fixed interval while running.
+
+```
+define myTimer as eventtimer -->
+    set myTimer\interval = 2s.
+    set myTimer\event = onTick().
+<--
+
+define onTick() returns null -->
+    print "Tick" + newline().
+    return null.
+<--
+
+set myTimer\running = true.
+```
+
+---
+
 ## 17. Reading Values from a Form
 
 Read a control's current value using the object-path syntax:

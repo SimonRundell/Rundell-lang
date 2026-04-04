@@ -1,14 +1,19 @@
 //! Property inspector panel for the form designer.
 
 use egui::{Color32, Ui};
+use std::collections::HashMap;
 use super::DesignControl;
 use rundell_interpreter::form_registry::{ControlState, TextAlign};
 
 /// Shows editable properties for the selected control.
-pub struct Inspector;
+pub struct Inspector {
+    select_items_buffer: HashMap<String, String>,
+}
 
 impl Inspector {
-    pub fn new() -> Self { Inspector }
+    pub fn new() -> Self {
+        Inspector { select_items_buffer: HashMap::new() }
+    }
 
     /// Render the inspector panel for a given control.
     pub fn show(&mut self, ui: &mut Ui, ctrl: &mut DesignControl) {
@@ -36,48 +41,67 @@ impl Inspector {
 
         // Control-specific properties
         match &mut ctrl.state {
-            ControlState::Label { value, text_color, text_align, .. } => {
+            ControlState::Label { value, text_color, font, font_size, text_align, .. } => {
                 ui.label("Value:"); ui.text_edit_singleline(value);
                 ui.label("Text color:"); ui.text_edit_singleline(text_color);
+                Self::font_fields(ui, font, font_size);
                 Self::text_align_picker(ui, text_align);
             }
-            ControlState::Textbox { value, placeholder, readonly, text_align, .. } => {
+            ControlState::Textbox { value, placeholder, readonly, font, font_size, text_align, .. } => {
                 ui.label("Value:"); ui.text_edit_singleline(value);
                 ui.label("Placeholder:"); ui.text_edit_singleline(placeholder);
                 ui.checkbox(readonly, "Read-only");
+                Self::font_fields(ui, font, font_size);
                 Self::text_align_picker(ui, text_align);
             }
-            ControlState::Button { caption, text_color, background_color, text_align, .. } => {
+            ControlState::Button { caption, text_color, background_color, font, font_size, text_align, .. } => {
                 ui.label("Caption:"); ui.text_edit_singleline(caption);
                 ui.label("Text color:"); ui.text_edit_singleline(text_color);
                 ui.label("Background:"); ui.text_edit_singleline(background_color);
+                Self::font_fields(ui, font, font_size);
                 Self::text_align_picker(ui, text_align);
             }
-            ControlState::Radiobutton { caption, group, text_align, .. } => {
+            ControlState::Radiobutton { caption, group, font, font_size, text_align, .. } => {
                 ui.label("Caption:"); ui.text_edit_singleline(caption);
                 ui.label("Group:"); ui.text_edit_singleline(group);
+                Self::font_fields(ui, font, font_size);
                 Self::text_align_picker(ui, text_align);
             }
-            ControlState::Checkbox { caption, checked, text_align, .. } => {
+            ControlState::Checkbox { caption, checked, font, font_size, text_align, .. } => {
                 ui.label("Caption:"); ui.text_edit_singleline(caption);
                 ui.checkbox(checked, "Checked");
+                Self::font_fields(ui, font, font_size);
                 Self::text_align_picker(ui, text_align);
             }
-            ControlState::Switch { caption, checked, text_align, .. } => {
+            ControlState::Switch { caption, checked, font, font_size, text_align, .. } => {
                 ui.label("Caption:"); ui.text_edit_singleline(caption);
                 ui.checkbox(checked, "Checked");
+                Self::font_fields(ui, font, font_size);
                 Self::text_align_picker(ui, text_align);
             }
-            ControlState::Select { text_align, .. } => {
-                ui.label("(Items set via code)");
+            ControlState::Select { items, font, font_size, text_align, .. } => {
+                ui.label("Items (comma-separated):");
+                let buffer = self
+                    .select_items_buffer
+                    .entry(ctrl.name.clone())
+                    .or_insert_with(|| items.join(", "));
+                if ui.text_edit_singleline(buffer).changed() {
+                    *items = buffer
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                }
+                Self::font_fields(ui, font, font_size);
                 Self::text_align_picker(ui, text_align);
             }
-            ControlState::Listbox { columns, .. } => {
+            ControlState::Listbox { columns, font, font_size, .. } => {
                 ui.label("Columns (comma-separated):");
                 let mut cols_str = columns.join(", ");
                 if ui.text_edit_singleline(&mut cols_str).changed() {
                     *columns = cols_str.split(',').map(|s| s.trim().to_string()).collect();
                 }
+                Self::font_fields(ui, font, font_size);
             }
         }
 
@@ -127,6 +151,13 @@ impl Inspector {
                 ui.selectable_value(text_align, TextAlign::Center, "center");
                 ui.selectable_value(text_align, TextAlign::Right, "right");
             });
+    }
+
+    fn font_fields(ui: &mut Ui, font: &mut String, font_size: &mut u32) {
+        ui.label("Font:");
+        ui.text_edit_singleline(font);
+        ui.label("Font size:");
+        ui.add(egui::DragValue::new(font_size).speed(1.0).clamp_range(6..=96));
     }
 
     /// Returns (top, left, width, height) as u32 values.

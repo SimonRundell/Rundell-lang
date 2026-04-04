@@ -1,0 +1,33 @@
+# gui_timer.run
+# A simple GUI timer that updates a label every second
+# Run with:  rundell-gui gui_timer.run
+
+define ticks as integer = 0.
+
+define timerForm as form -->
+    set form\title = "Timer Demo".
+    set form\width = 360px.
+    set form\height = 180px.
+
+    define tickLbl as form\label.
+
+    set tickLbl\position = 10px, 10px, 330px, 28px.
+    set tickLbl\value = "Ticks: 0".
+
+    # Auto-start timer; no buttons required.
+<--
+
+define myTimer as eventtimer -->
+    set myTimer\interval = 1s.
+    set myTimer\event = onTick().
+<--
+
+define onTick() returns null -->
+    set ticks = ticks + 1.
+    set timerForm\tickLbl\value = "Ticks: " + string(ticks).
+    return null.
+<--
+
+set myTimer\running = true.
+
+rootWindow\timerForm\show().

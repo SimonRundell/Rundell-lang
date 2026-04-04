@@ -3,33 +3,41 @@
 # Run with:  rundell-gui gui_calculator.run
 
 define calcForm as form -->
-    set form\title = "Calculator".
-    define numA    as form\textbox.
-    define numB    as form\textbox.
-    define opBox   as form\select.
-    define calcBtn as form\button.
-    define result  as form\label.
+    set form\title = "calcForm".
+    set form\width = 760px.
+    set form\height = 520px.
+    set form\resizable = true.
+    set form\backgroundcolor = "#F2F2F2".
+    set form\textcolor = "#202020".
+    set form\textbackground = "#FFFFFF".
 
-    set numA\position    = 10px, 10px, 120px, 28px.
+    define numA as form\textbox.
+    set numA\position = 10px, 10px, 120px, 28px.
     set numA\placeholder = "First number".
 
-    set opBox\position   = 140px, 10px, 80px, 28px.
-    set opBox\options    = "+,-,*,/".
-
-    set numB\position    = 230px, 10px, 120px, 28px.
+    define numB as form\textbox.
+    set numB\position = 10px, 230px, 120px, 28px.
     set numB\placeholder = "Second number".
 
-    set calcBtn\position = 10px, 50px, 100px, 30px.
-    set calcBtn\caption  = "Calculate".
-    set calcBtn\click    = calculate().
+    define opBox as form\select.
+    set opBox\position = 10px, 140px, 80px, 28px.
+    set opBox\items = "+, -, *, /".
+    set opBox\value = "+".
 
-    set result\position  = 10px, 95px, 340px, 28px.
-    set result\value     = "Result will appear here.".
+    define calcBtn as form\button.
+    set calcBtn\position = 50px, 10px, 100px, 30px.
+    set calcBtn\caption = "Calculate".
+    set calcBtn\click = calculate().
+
+    define result as form\label.
+    set result\position = 95px, 10px, 340px, 28px.
+    set result\value = "Result will appear here.".
+    set result\fontsize = 18.
 <--
 
 define calculate() returns null -->
-    define a  as integer = integer(calcForm\numA\value).
-    define b  as integer = integer(calcForm\numB\value).
+    define a  as integer = cast(calcForm\numA\value, integer).
+    define b  as integer = cast(calcForm\numB\value, integer).
     define op as string  = calcForm\opBox\value.
     define r  as integer = 0.
 

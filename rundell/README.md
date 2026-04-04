@@ -40,6 +40,7 @@ rootWindow\myForm\show().
 - [REPL](#repl)
 - [Language at a Glance](#language-at-a-glance)
 - [Further Reading](#further-reading)
+- [What's New in 0.1.4](#whats-new-in-014)
 - [What's New in 0.1.3](#whats-new-in-013)
 
 ---
@@ -116,7 +117,7 @@ Launch the interactive Read-Eval-Print Loop by running `rundell` with no argumen
 
 ```
 $ rundell
-Rundell 0.1.3  —  type 'exit' or Ctrl+D to quit
+Rundell 0.1.4  —  type 'exit' or Ctrl+D to quit
 > define x as integer = 10.
 > print string(x * 2) + newline().
 20
@@ -181,6 +182,7 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 | [`examples/error_handling_demo.run`](examples/error_handling_demo.run) | try/catch/finally patterns |
 | [`examples/file_io_text_json.run`](examples/file_io_text_json.run) | Read/write UTF-8 text and JSON |
 | [`examples/file_io_csv.run`](examples/file_io_csv.run) | Read/write CSV data |
+| [`examples/timer_basic.run`](examples/timer_basic.run) | Event timer (headless) demo |
 
 ### GUI programs (run with `rundell-gui`)
 
@@ -191,6 +193,7 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 | [`examples/gui_temperature.run`](examples/gui_temperature.run) | Temperature converter form |
 | [`examples/gui_contact_book.run`](examples/gui_contact_book.run) | Contact book with listbox |
 | [`examples/gui_dialogs.run`](examples/gui_dialogs.run) | Message box, open-file, save-file dialogs |
+| [`examples/gui_timer.run`](examples/gui_timer.run) | Timer-driven GUI label updates |
 
 ---
 
@@ -201,6 +204,15 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 - [**Examples**](examples/) — ready-to-run sample programs (console and GUI)
 
 ---
+
+## What's New in 0.1.4
+
+- Named event timers (`eventtimer`) with `interval`, `running`, and `event`
+- Duration literals for timers: `500ms`, `2s`, `1m`, `1h`
+- Headless timer dispatch in CLI mode
+- GUI example: timer-driven label updates
+- GUI controls now support `font` and `fontsize`
+- Designer: Select controls can edit and emit `items`
 
 ## What's New in 0.1.3
 

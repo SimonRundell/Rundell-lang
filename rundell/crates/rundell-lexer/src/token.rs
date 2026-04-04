@@ -24,6 +24,24 @@ fn parse_pixel_value(lex: &mut Lexer<Token>) -> Option<u32> {
     s[..s.len() - 2].parse().ok()
 }
 
+/// Parse a duration literal such as `500ms`, `2s`, `1m`, or `1h` into milliseconds.
+fn parse_duration_value(lex: &mut Lexer<Token>) -> Option<u64> {
+    let s = lex.slice();
+    if let Some(num) = s.strip_suffix("ms") {
+        return num.parse::<u64>().ok();
+    }
+    if let Some(num) = s.strip_suffix('s') {
+        return num.parse::<u64>().ok().map(|n| n * 1_000);
+    }
+    if let Some(num) = s.strip_suffix('m') {
+        return num.parse::<u64>().ok().map(|n| n * 60_000);
+    }
+    if let Some(num) = s.strip_suffix('h') {
+        return num.parse::<u64>().ok().map(|n| n * 3_600_000);
+    }
+    None
+}
+
 /// Parse a float literal (digits, decimal point, digits).
 fn parse_float(lex: &mut Lexer<Token>) -> Option<f64> {
     lex.slice().parse().ok()
@@ -428,6 +446,10 @@ pub enum Token {
     #[regex(r"[0-9]+px", parse_pixel_value, priority = 5)]
     PixelValue(u32),
 
+    /// A duration literal: digits followed by ms/s/m/h, e.g. `500ms`.
+    #[regex(r"[0-9]+(?:ms|s|m|h)", parse_duration_value, priority = 5)]
+    DurationValue(u64),
+
     // -----------------------------------------------------------------------
     // GUI — form and control keywords
     // -----------------------------------------------------------------------
@@ -455,6 +477,9 @@ pub enum Token {
     /// `dialog` built-in namespace keyword
     #[token("dialog")]
     KwDialog,
+    /// `eventtimer` definition keyword
+    #[token("eventtimer")]
+    KwEventTimer,
 
     // -----------------------------------------------------------------------
     // GUI — control type keywords

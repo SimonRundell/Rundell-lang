@@ -9,7 +9,7 @@ use rundell_lexer::{lex, Token};
 
 use crate::ast::{
     AttemptBlock, AwaitExpr, BinOp, CatchClause, CmpOp, ControlType, CredentialsDefinition,
-    DefineStmt, DialogCall, Expr, ForEachStmt, ForLoopStmt, FormDefinition, FunctionDefStmt,
+    DefineStmt, DialogCall, EventTimerDefinition, Expr, ForEachStmt, ForLoopStmt, FormDefinition, FunctionDefStmt,
     HttpMethod, IfStmt, Literal, MessageKind, Param, QueryDefinition, ReceiveStmt, RundellType,
     SetOp, SetStmt, SetTarget, Stmt, SwitchCase, SwitchPattern, SwitchStmt, TryCatchStmt,
     UnaryOp, WhileLoopStmt,
@@ -410,6 +410,13 @@ impl Parser {
             }
         }
 
+        // --- GUI: event timer definition ---
+        if self.check(&Token::KwEventTimer) {
+            self.advance(); // consume 'eventtimer'
+            self.expect(&Token::Arrow)?;
+            return self.parse_eventtimer_body(name);
+        }
+
         // --- REST: credentials definition ---
         if self.check(&Token::KwCredentials) {
             self.advance(); // consume 'credentials'
@@ -456,6 +463,19 @@ impl Parser {
         }
         self.expect(&Token::ArrowEnd)?;
         Ok(Stmt::FormDef(FormDefinition { name, body }))
+    }
+
+    /// Parse the body of a `define name as eventtimer --> ... <--` block.
+    fn parse_eventtimer_body(&mut self, name: String) -> Result<Stmt, ParseError> {
+        let mut body = Vec::new();
+        while !self.check(&Token::ArrowEnd) {
+            if self.peek().is_none() {
+                return Err(ParseError::UnexpectedEof);
+            }
+            body.push(self.parse_stmt()?);
+        }
+        self.expect(&Token::ArrowEnd)?;
+        Ok(Stmt::EventTimerDef(EventTimerDefinition { name, body }))
     }
 
     /// Parse a control type keyword after `form\`.
@@ -1260,6 +1280,11 @@ impl Parser {
             Some(Token::PixelValue(n)) => {
                 self.advance();
                 Ok(Expr::PixelValue(n))
+            }
+            // Duration value literal: `500ms`, `2s`, `1m`, `1h`
+            Some(Token::DurationValue(ms)) => {
+                self.advance();
+                Ok(Expr::DurationValue(ms))
             }
             Some(t) => Err(ParseError::UnexpectedToken {
                 found: format!("{t:?}"),
