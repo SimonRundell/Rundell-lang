@@ -190,3 +190,9 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 - [**Tutorial**](docs/TUTORIAL.md) — step-by-step introduction for new users
 - [**Language Reference**](docs/LANGUAGE_REFERENCE.md) — complete specification with examples
 - [**Examples**](examples/) — ready-to-run sample programs (console and GUI)
+
+---
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
