@@ -16,8 +16,8 @@ attempt -->
     set result = await get404().
     print "Should not reach here." + newline().
 <-- catch err -->
-    print "  Caught — status: " + err\statusCode + newline().
-    print "  Message: "         + err\message    + newline().
+    print "  Caught — status: " + string(err["statusCode"]) + newline().
+    print "  Message: "         + err["message"]    + newline().
 <--
 
 print newline().
@@ -35,7 +35,7 @@ attempt -->
     set result2 = await get500().
     print "Should not reach here." + newline().
 <-- catch err -->
-    print "  Caught — status: " + err\statusCode + newline().
+    print "  Caught — status: " + string(err["statusCode"]) + newline().
 <--
 
 print newline().
@@ -54,7 +54,7 @@ attempt -->
     set result3 = await slowEndpoint().
     print "Should not reach here." + newline().
 <-- catch err -->
-    print "  Timed out as expected — status code: " + err\statusCode + newline().
+    print "  Timed out as expected — status code: " + string(err["statusCode"]) + newline().
 <--
 
 print newline().
@@ -72,7 +72,7 @@ attempt -->
     set dog = await getOk().
     print "  Success — status: " + dog["status"] + newline().
 <-- catch err -->
-    print "  Unexpected failure: " + err\message + newline().
+    print "  Unexpected failure: " + err["message"] + newline().
 <--
 
 print newline().

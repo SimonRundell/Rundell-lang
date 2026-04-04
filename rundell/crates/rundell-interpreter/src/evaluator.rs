@@ -576,7 +576,11 @@ impl Interpreter {
 
     fn exec_print(&mut self, expr: Expr) -> Result<(), RuntimeError> {
         let val = self.eval_expr(expr)?;
-        let s = val.to_display_string();
+        let s = match &val {
+            Value::Json(json) => serde_json::to_string_pretty(json)
+                .unwrap_or_else(|_| json.to_string()),
+            _ => val.to_display_string(),
+        };
         self.stdout
             .write_all(s.as_bytes())
             .map_err(|e| RuntimeError::IOError(e.to_string()))?;

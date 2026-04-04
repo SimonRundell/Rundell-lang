@@ -3,12 +3,12 @@
 # No credentials required.
 # Run with:  rundell rest_dog_api.run
 
-define getRandomDog() returns json as query -->
+define getRandomDog()  as query returns json -->
     set getRandomDog\method   = GET.
     set getRandomDog\endpoint = "https://dog.ceo/api/breeds/image/random".
 <--
 
-define getAllBreeds() returns json as query -->
+define getAllBreeds() as query returns json -->
     set getAllBreeds\method   = GET.
     set getAllBreeds\endpoint = "https://dog.ceo/api/breeds/list/all".
 <--
@@ -21,6 +21,7 @@ attempt -->
     set dog = await getRandomDog().
     print "Image URL: " + dog["message"] + newline().
     print "Status:    " + dog["status"]  + newline().
+    print dog.
 <-- catch err -->
     print "Could not fetch dog image: " + err\message + newline().
 <--

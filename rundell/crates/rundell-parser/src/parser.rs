@@ -344,9 +344,8 @@ impl Parser {
                 _ => { i += 1; }
             }
         }
-        // After `(params)` we expect `) as query`
-        // i now points to the RParen that closed the params.
-        i += 1; // skip RParen
+        // After `(params)` we expect `) as query`.
+        // i now points to the token immediately after the closing RParen.
         // Next should be `as`
         if self.tokens.get(self.pos + i).map(|(t, _)| t) != Some(&Token::As) {
             return false;
