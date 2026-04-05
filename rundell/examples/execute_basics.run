@@ -1,0 +1,6 @@
+# execute_basics.run
+# Demonstrates execute() for running external programs.
+# Run with:  rundell execute_basics.run
+
+print "Launching calculator..." + newline().
+execute("calc.exe").

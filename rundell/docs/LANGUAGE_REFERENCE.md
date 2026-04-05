@@ -97,6 +97,7 @@ define x as integer = 5.   # inline comment after terminator
 | `currency` | Fixed 2 decimal places (stored as integer cents) | `9.99`, `1000.00` |
 | `boolean` | Logical true/false | `true`, `false`, `yes`, `no` |
 | `json` | Hierarchical key-value collection | `{ "key": [1, 2, 3] }` |
+| `datetime` | ISO 8601 datetime with optional timezone offset | `|2026-04-04 17:41:44|`, `|2026-04-04T17:41:44-12:00|` |
 
 ---
 
@@ -144,6 +145,14 @@ Escape sequences:
 0.50
 ```
 Always stored and displayed to exactly 2 decimal places.
+
+### Datetime
+Delimited by `|` and written in ISO 8601 form. The `T` separator and timezone offset are optional.
+
+```
+|2026-04-04 17:41:44|
+|2026-04-04T17:41:44-12:00|
+```
 
 ### Boolean
 
@@ -216,6 +225,11 @@ For GUI object-path assignment see [§21](#21-gui--object-paths).
 | `%` | Modulo (remainder) | Integers only |
 | `**` | Exponentiation | Right-associative |
 
+Datetime arithmetic:
+- `datetime + integer` → datetime (integer is milliseconds)
+- `datetime - integer` → datetime (integer is milliseconds)
+- `datetime - datetime` → integer (milliseconds)
+
 ### Comparison (return boolean)
 
 `==`  `!=`  `<`  `<=`  `>`  `>=`
@@ -265,6 +279,8 @@ cast(<expression>, <targetType>)
 | `float` | `integer` | Truncates toward zero |
 | `boolean` | `string` | `"true"` or `"false"` |
 | any | `string` | Always permitted |
+| `string` | `datetime` | ISO 8601 format required |
+| `datetime` | `string` | ISO 8601 output |
 
 A cast that cannot succeed (e.g. `cast("hello", integer)`) raises a TypeError.
 
@@ -288,6 +304,18 @@ All built-ins are expressions and can appear anywhere a value is expected.
 | `upper(str)` | string | Convert to uppercase |
 | `lower(str)` | string | Convert to lowercase |
 | `trim(str)` | string | Strip leading and trailing whitespace |
+| `execute(path)` | null | Execute a program or script; stdout/stderr forward to CLI |
+| `os()` | string | Returns `"windows"`, `"macos"`, `"linux"`, or `"unknown"` |
+| `now()` | datetime | Current local datetime with offset |
+| `day(datetime)` | integer | Day of month (1-31) |
+| `month(datetime)` | integer | Month (1-12) |
+| `year(datetime)` | integer | Year (4-digit) |
+| `hour(datetime)` | integer | Hour (0-23) |
+| `minute(datetime)` | integer | Minute (0-59) |
+| `second(datetime)` | integer | Second (0-59) |
+| `dateformat(format, datetime)` | string | Format datetime using ISO tokens (`YYYY`, `MM`, `DD`, `HH`, `mm`, `SS`, `ZZ`) |
+| `timestamp(datetime)` | integer | Milliseconds since Unix epoch |
+| `fromtimestamp(ms)` | datetime | Datetime from Unix epoch milliseconds (UTC) |
 | `append(collection, value)` | null | Append element to a json array (mutates in place) |
 | `read_text(path)` | string | Read a UTF-8 text file |
 | `write_text(path, content)` | null | Write a UTF-8 text file (overwrites) |
@@ -297,6 +325,11 @@ All built-ins are expressions and can appear anywhere a value is expected.
 | `write_csv(path, rows, include_headers)` | null | Write CSV from a json array |
 
 ---
+
+`execute(path)` rules:
+- If `path` contains `/` or `\`, it is resolved relative to the running `.run` file directory.
+- If `path` contains no separators, `$PATH` is searched.
+- Mixing `/` and `\` in the same path is a syntax error.
 
 ## 12. Input and Output
 
@@ -1050,8 +1083,10 @@ null  and  or  not  is
 print  receive  with  prompt
 try  catch  finally
 integer  float  string  currency  boolean  json
+datetime
 cast  length  newline  abs  floor  ceil  round
-substr  upper  lower  trim  append  remove
+substr  upper  lower  trim  now  day  month  year  hour  minute  second
+dateformat  timestamp  fromtimestamp  execute  os  append  remove
 returns
 
 # GUI keywords
@@ -1081,6 +1116,7 @@ rootWindow
 | `IndexError` | Collection index out of bounds |
 | `DivisionError` | Division or modulo by zero |
 | `IOError` | Input/output failure |
+| `PermissionError` | Insufficient permissions to execute a program or script |
 | `RuntimeError` | Catch-all for any other runtime error; also raised on invalid object paths |
 
 ### Query errors (caught by attempt/catch)

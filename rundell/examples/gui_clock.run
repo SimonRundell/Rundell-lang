@@ -1,0 +1,34 @@
+# gui_clock.run
+# On-screen clock using an event timer.
+# Run with:  rundell-gui gui_clock.run
+
+define clockForm as form -->
+    set form\title = "Clock".
+    set form\width = 360px.
+    set form\height = 160px.
+
+    define timeLbl as form\label.
+    define dateLbl as form\label.
+
+    set timeLbl\position = 30px, 20px, 300px, 36px.
+    set timeLbl\value = "--:--:--".
+
+    set dateLbl\position = 70px, 20px, 300px, 28px.
+    set dateLbl\value = "---- -- --".
+<--
+
+define clockTimer as eventtimer -->
+    set clockTimer\interval = 1s.
+    set clockTimer\event = onTick().
+<--
+
+define onTick() returns null -->
+    define current as datetime.
+    set current = now().
+    set clockForm\timeLbl\value = dateformat("HH:mm:SS", current).
+    set clockForm\dateLbl\value = dateformat("YYYY-MM-DD", current).
+    return null.
+<--
+
+set clockTimer\running = true.
+rootWindow\clockForm\show().

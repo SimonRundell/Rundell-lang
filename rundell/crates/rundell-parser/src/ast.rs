@@ -17,6 +17,8 @@ pub enum RundellType {
     Boolean,
     /// JSON collection type.
     Json,
+    /// ISO 8601 datetime with optional timezone offset.
+    DateTime,
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +82,8 @@ pub enum Literal {
     Currency(i64),
     /// Boolean literal.
     Boolean(bool),
+    /// Datetime literal in ISO 8601 format.
+    DateTime(String),
     /// The keyword `null`.
     Null,
 }

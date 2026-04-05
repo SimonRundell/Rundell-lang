@@ -33,6 +33,7 @@ This tutorial takes you from zero to a working knowledge of Rundell — includin
 25. [Authenticated APIs](#25-authenticated-apis)
 26. [REST Data in a GUI Listbox](#26-rest-data-in-a-gui-listbox)
 27. [File I/O](#27-file-io)
+28. [Executing External Programs](#28-executing-external-programs)
 
 ---
 
@@ -1106,6 +1107,27 @@ print loaded[0]["name"] + newline().
 ```
 
 `read_csv(..., true)` returns a json array of objects; `read_csv(..., false)` returns a json array of arrays.
+
+---
+
+## 28. Executing External Programs
+
+Use `execute(path)` to run a program or script. If `path` includes a directory separator, it is resolved relative to the `.run` file folder. If there is no separator, Rundell searches the `PATH`.
+
+```
+# Launches a program found on PATH (Windows example)
+execute("calc.exe").
+```
+
+```
+# Relative path (uses the .run file directory as the base)
+execute("tools\my_tool.exe").
+```
+
+**Rules:**
+- Do not mix `/` and `\` in the same path.
+- If permissions are insufficient, a `PermissionError` is raised.
+- Any stdout/stderr from the program is forwarded to the Rundell CLI.
 
 ---
 

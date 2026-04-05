@@ -1,0 +1,19 @@
+# execute_cross_platform.run
+# Executes a platform-appropriate calculator using os().
+# Run with:  rundell execute_cross_platform.run
+
+print "Executing external program..." + newline().
+
+define platform as string = os().
+
+if (platform == "windows") -->
+	execute("calc.exe").
+else if (platform == "macos") -->
+	execute("open").
+	execute("-a").
+	execute("Calculator").
+else if (platform == "linux") -->
+	execute("gnome-calculator").
+else -->
+	print "Unknown platform: " + platform + newline().
+<--

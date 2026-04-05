@@ -40,6 +40,7 @@ rootWindow\myForm\show().
 - [REPL](#repl)
 - [Language at a Glance](#language-at-a-glance)
 - [Further Reading](#further-reading)
+- [What's New in 0.1.5](#whats-new-in-015)
 - [What's New in 0.1.4](#whats-new-in-014)
 - [What's New in 0.1.3](#whats-new-in-013)
 
@@ -117,7 +118,7 @@ Launch the interactive Read-Eval-Print Loop by running `rundell` with no argumen
 
 ```
 $ rundell
-Rundell 0.1.4  —  type 'exit' or Ctrl+D to quit
+Rundell 0.1.5  —  type 'exit' or Ctrl+D to quit
 > define x as integer = 10.
 > print string(x * 2) + newline().
 20
@@ -178,6 +179,9 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 | [`examples/grade_calculator.run`](examples/grade_calculator.run) | Grade average and letter grade |
 | [`examples/temperature_converter.run`](examples/temperature_converter.run) | Console °C ↔ °F converter |
 | [`examples/string_utils.run`](examples/string_utils.run) | String manipulation demos |
+| [`examples/datetime_basics.run`](examples/datetime_basics.run) | Datetime literals, arithmetic, and formatting |
+| [`examples/execute_basics.run`](examples/execute_basics.run) | Execute external programs via PATH or relative paths |
+| [`examples/execute_cross_platform.run`](examples/execute_cross_platform.run) | Execute external programs on different OSes |
 | [`examples/contact_book.run`](examples/contact_book.run) | In-memory contact list |
 | [`examples/error_handling_demo.run`](examples/error_handling_demo.run) | try/catch/finally patterns |
 | [`examples/file_io_text_json.run`](examples/file_io_text_json.run) | Read/write UTF-8 text and JSON |
@@ -194,6 +198,7 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 | [`examples/gui_contact_book.run`](examples/gui_contact_book.run) | Contact book with listbox |
 | [`examples/gui_dialogs.run`](examples/gui_dialogs.run) | Message box, open-file, save-file dialogs |
 | [`examples/gui_timer.run`](examples/gui_timer.run) | Timer-driven GUI label updates |
+| [`examples/gui_clock.run`](examples/gui_clock.run) | On-screen clock with event timer |
 
 ---
 
@@ -213,6 +218,14 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 - GUI example: timer-driven label updates
 - GUI controls now support `font` and `fontsize`
 - Designer: Select controls can edit and emit `items`
+
+## What's New in 0.1.5
+
+- New `datetime` type with ISO 8601 literals (pipe-delimited)
+- Datetime built-ins: `now`, `day`, `month`, `year`, `hour`, `minute`, `second`, `dateformat`
+- Datetime arithmetic support (`datetime +/- integer`, `datetime - datetime`)
+- Execute external programs with `execute(path)`
+- New examples: datetime basics, execute basics, and GUI clock
 
 ## What's New in 0.1.3
 

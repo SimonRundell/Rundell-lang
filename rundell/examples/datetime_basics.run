@@ -1,0 +1,28 @@
+# datetime_basics.run
+# Demonstrates datetime literals, now(), arithmetic, casting, and formatting.
+
+define birthday as datetime = |1967-10-08 00:00:00|.
+
+define nowDt as datetime.
+set nowDt = now().
+
+# Milliseconds between two datetimes
+define ageMs as integer.
+set ageMs = nowDt - birthday.
+
+# Add one day (86,400,000 ms)
+define tomorrow as datetime.
+set tomorrow = nowDt + 86400000.
+
+print "Now (ISO): " + string(nowDt) + newline().
+print "Birthday (ISO): " + string(birthday) + newline().
+print "Age (ms): " + string(ageMs) + newline().
+print "Tomorrow: " + string(tomorrow) + newline().
+
+# Format using ISO tokens
+print "Formatted: " + dateformat("YYYY-MM-DD HH:mm:SS", nowDt) + newline().
+
+# Cast from string
+define parsed as datetime.
+set parsed = cast("2026-04-04T17:41:44-12:00", datetime).
+print "Parsed: " + string(parsed) + newline().

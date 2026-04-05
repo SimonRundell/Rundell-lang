@@ -418,6 +418,7 @@ fn expr_to_string(expr: &Expr) -> Option<String> {
             Literal::Float(f) => Some(f.to_string()),
             Literal::Boolean(b) => Some(b.to_string()),
             Literal::Currency(c) => Some(format!("{:.2}", *c as f64 / 100.0)),
+            Literal::DateTime(s) => Some(s.clone()),
             Literal::Null => None,
         },
         Expr::Identifier(name) => Some(name.clone()),

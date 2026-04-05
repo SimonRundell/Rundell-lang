@@ -25,6 +25,10 @@ pub enum RuntimeError {
     #[error("IOError: {0}")]
     IOError(String),
 
+    /// Insufficient permissions to execute a program or script.
+    #[error("PermissionError: insufficient permissions to execute '{path}'")]
+    PermissionError { path: String },
+
     /// A catch-all for other runtime errors.
     #[error("RuntimeError: {0}")]
     RuntimeError(String),

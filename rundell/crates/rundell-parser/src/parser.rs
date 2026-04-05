@@ -262,6 +262,9 @@ impl Parser {
             Some(Token::Ident(_)) => self.parse_expr_stmt(),
             // `dialog\openfile(...)` etc. as a bare statement (result discarded)
             Some(Token::KwDialog) => self.parse_expr_stmt(),
+            // Built-ins that can appear as standalone statements
+            Some(Token::Execute) => self.parse_expr_stmt(),
+            Some(Token::Os) => self.parse_expr_stmt(),
             Some(t) => {
                 let t = t.clone();
                 Err(ParseError::UnexpectedToken {
@@ -795,6 +798,7 @@ impl Parser {
                 | Some(Token::Float(_))
                 | Some(Token::CurrencyLit(_))
                 | Some(Token::StringLit(_))
+                | Some(Token::DateTimeLit(_))
                 | Some(Token::BoolTrue)
                 | Some(Token::BoolFalse)
                 | Some(Token::Ident(_))
@@ -1056,6 +1060,10 @@ impl Parser {
                 self.advance();
                 Ok(RundellType::Json)
             }
+            Some(Token::KwDateTime) => {
+                self.advance();
+                Ok(RundellType::DateTime)
+            }
             Some(t) => Err(ParseError::UnexpectedToken {
                 found: format!("{t:?}"),
                 pos: self.current_pos(),
@@ -1213,6 +1221,10 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Literal(Literal::Str(s)))
             }
+            Some(Token::DateTimeLit(s)) => {
+                self.advance();
+                Ok(Expr::Literal(Literal::DateTime(s)))
+            }
             Some(Token::BoolTrue) => {
                 self.advance();
                 Ok(Expr::Literal(Literal::Boolean(true)))
@@ -1244,6 +1256,18 @@ impl Parser {
             Some(Token::Upper) => self.parse_builtin_call("upper"),
             Some(Token::Lower) => self.parse_builtin_call("lower"),
             Some(Token::Trim) => self.parse_builtin_call("trim"),
+            Some(Token::Execute) => self.parse_builtin_call("execute"),
+            Some(Token::Os) => self.parse_builtin_call("os"),
+            Some(Token::Now) => self.parse_builtin_call("now"),
+            Some(Token::Day) => self.parse_builtin_call("day"),
+            Some(Token::Month) => self.parse_builtin_call("month"),
+            Some(Token::Year) => self.parse_builtin_call("year"),
+            Some(Token::Hour) => self.parse_builtin_call("hour"),
+            Some(Token::Minute) => self.parse_builtin_call("minute"),
+            Some(Token::Second) => self.parse_builtin_call("second"),
+            Some(Token::DateFormat) => self.parse_builtin_call("dateformat"),
+            Some(Token::Timestamp) => self.parse_builtin_call("timestamp"),
+            Some(Token::FromTimestamp) => self.parse_builtin_call("fromtimestamp"),
             Some(Token::KwString) => self.parse_builtin_call("string"),
             Some(Token::Append) => self.parse_builtin_call("append"),
             // REST / query built-ins
@@ -1435,6 +1459,7 @@ impl Parser {
             Some(Token::KwCurrency) => "currency",
             Some(Token::KwBoolean) => "boolean",
             Some(Token::KwJson) => "json",
+            Some(Token::KwDateTime) => "datetime",
             Some(t) => {
                 return Err(ParseError::UnexpectedToken {
                     found: format!("{t:?}"),

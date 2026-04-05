@@ -7,7 +7,10 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{Duration, Instant};
+
+use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, SecondsFormat, TimeZone, Duration as ChronoDuration, Datelike, Timelike, Utc};
 
 use rundell_parser::ast::{
     BinOp, CmpOp, DefineStmt, DialogCall, EventTimerDefinition, Expr, ForEachStmt, ForLoopStmt,
@@ -100,6 +103,8 @@ pub enum Value {
     Boolean(bool),
     /// JSON collection.
     Json(serde_json::Value),
+    /// ISO 8601 datetime with timezone offset.
+    DateTime(DateTime<FixedOffset>),
     /// The null / uninitialised value.
     Null,
 }
@@ -114,6 +119,7 @@ impl Value {
             Value::Currency(_) => "currency",
             Value::Boolean(_) => "boolean",
             Value::Json(_) => "json",
+            Value::DateTime(_) => "datetime",
             Value::Null => "null",
         }
     }
@@ -144,6 +150,7 @@ impl Value {
             }
             Value::Boolean(b) => if *b { "true" } else { "false" }.to_string(),
             Value::Json(v) => v.to_string(),
+            Value::DateTime(dt) => dt.to_rfc3339_opts(SecondsFormat::Secs, true),
             Value::Null => "null".to_string(),
         }
     }
@@ -163,6 +170,7 @@ impl Value {
             Value::Currency(c) => *c != 0,
             Value::Str(s) => !s.is_empty(),
             Value::Json(_) => true,
+            Value::DateTime(_) => true,
             Value::Null => false,
         }
     }
@@ -550,7 +558,7 @@ impl Interpreter {
     /// Evaluate simple (non-identifier, non-call) expressions for path navigation.
     fn eval_expr_simple(expr: &Expr) -> Result<Value, RuntimeError> {
         match expr {
-            Expr::Literal(lit) => Ok(literal_to_value(lit.clone())),
+            Expr::Literal(lit) => literal_to_value(lit.clone()),
             _ => Err(RuntimeError::RuntimeError(
                 "complex index paths not supported in set target".to_string(),
             )),
@@ -1000,7 +1008,7 @@ impl Interpreter {
     /// Evaluate an expression to a value.
     pub fn eval_expr(&mut self, expr: Expr) -> Result<Value, RuntimeError> {
         match expr {
-            Expr::Literal(lit) => Ok(literal_to_value(lit)),
+            Expr::Literal(lit) => literal_to_value(lit),
             Expr::Identifier(name) => {
                 let val = self.env.get(&name)?.clone();
                 // Accessing a null variable raises NullError
@@ -1303,6 +1311,129 @@ impl Interpreter {
                         "trim() requires string".to_string(),
                     )),
                 }
+            }
+
+            "execute" => {
+                let v = self.eval_args(args, 1)?;
+                let raw = self.expect_string_arg(&v[0], "execute", "path")?;
+                let target = self.resolve_execute_path(&raw)?;
+                let output = Command::new(&target).output().map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        RuntimeError::PermissionError { path: raw.clone() }
+                    } else {
+                        RuntimeError::IOError(format!(
+                            "execute() failed for '{}': {e}",
+                            target.display()
+                        ))
+                    }
+                })?;
+
+                if !output.stdout.is_empty() {
+                    self.stdout
+                        .write_all(&output.stdout)
+                        .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+                }
+                if !output.stderr.is_empty() {
+                    self.stdout
+                        .write_all(&output.stderr)
+                        .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+                }
+                self.stdout
+                    .flush()
+                    .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+
+                Ok(Value::Null)
+            }
+
+            "os" => {
+                if !args.is_empty() {
+                    return Err(RuntimeError::RuntimeError(
+                        "os() takes no arguments".to_string(),
+                    ));
+                }
+                let name = if cfg!(windows) {
+                    "windows"
+                } else if cfg!(target_os = "macos") {
+                    "macos"
+                } else if cfg!(target_os = "linux") {
+                    "linux"
+                } else {
+                    "unknown"
+                };
+                Ok(Value::Str(name.to_string()))
+            }
+
+            "now" => {
+                if !args.is_empty() {
+                    return Err(RuntimeError::RuntimeError(
+                        "now() takes no arguments".to_string(),
+                    ));
+                }
+                let now = Local::now();
+                let fixed = *now.offset();
+                Ok(Value::DateTime(now.with_timezone(&fixed)))
+            }
+
+            "day" => {
+                let v = self.eval_args(args, 1)?;
+                let dt = self.expect_datetime_arg(&v[0], "day", "datetime")?;
+                Ok(Value::Integer(dt.day() as i64))
+            }
+
+            "month" => {
+                let v = self.eval_args(args, 1)?;
+                let dt = self.expect_datetime_arg(&v[0], "month", "datetime")?;
+                Ok(Value::Integer(dt.month() as i64))
+            }
+
+            "year" => {
+                let v = self.eval_args(args, 1)?;
+                let dt = self.expect_datetime_arg(&v[0], "year", "datetime")?;
+                Ok(Value::Integer(dt.year() as i64))
+            }
+
+            "hour" => {
+                let v = self.eval_args(args, 1)?;
+                let dt = self.expect_datetime_arg(&v[0], "hour", "datetime")?;
+                Ok(Value::Integer(dt.hour() as i64))
+            }
+
+            "minute" => {
+                let v = self.eval_args(args, 1)?;
+                let dt = self.expect_datetime_arg(&v[0], "minute", "datetime")?;
+                Ok(Value::Integer(dt.minute() as i64))
+            }
+
+            "second" => {
+                let v = self.eval_args(args, 1)?;
+                let dt = self.expect_datetime_arg(&v[0], "second", "datetime")?;
+                Ok(Value::Integer(dt.second() as i64))
+            }
+
+            "dateformat" => {
+                let v = self.eval_args(args, 2)?;
+                let fmt = self.expect_string_arg(&v[0], "dateformat", "format")?;
+                let dt = self.expect_datetime_arg(&v[1], "dateformat", "datetime")?;
+                Ok(Value::Str(format_datetime(&dt, &fmt)))
+            }
+
+            "timestamp" => {
+                let v = self.eval_args(args, 1)?;
+                let dt = self.expect_datetime_arg(&v[0], "timestamp", "datetime")?;
+                Ok(Value::Integer(dt.timestamp_millis()))
+            }
+
+            "fromtimestamp" => {
+                let v = self.eval_args(args, 1)?;
+                let ms = match v[0] {
+                    Value::Integer(n) => n,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "fromtimestamp() requires integer milliseconds".to_string(),
+                        ))
+                    }
+                };
+                Ok(Value::DateTime(datetime_from_timestamp_ms(ms)?))
             }
 
             "string" => {
@@ -2583,6 +2714,40 @@ impl Interpreter {
             .map_err(|e| RuntimeError::IOError(e.to_string()))
     }
 
+    fn resolve_execute_path(&self, raw: &str) -> Result<PathBuf, RuntimeError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(RuntimeError::RuntimeError(
+                "execute() path cannot be empty".to_string(),
+            ));
+        }
+        if has_mixed_separators(trimmed) {
+            return Err(RuntimeError::RuntimeError(
+                "execute() path cannot mix '/' and '\\'".to_string(),
+            ));
+        }
+
+        if trimmed.contains('/') || trimmed.contains('\\') {
+            let candidate = self.resolve_io_path(trimmed)?;
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+            return Err(RuntimeError::RuntimeError(format!(
+                "execute() could not find '{}'",
+                trimmed
+            )));
+        }
+
+        if let Some(found) = find_executable_in_path(trimmed) {
+            return Ok(found);
+        }
+
+        Err(RuntimeError::RuntimeError(format!(
+            "execute() could not find '{}' in PATH",
+            trimmed
+        )))
+    }
+
     fn expect_string_arg(
         &self,
         value: &Value,
@@ -2610,6 +2775,20 @@ impl Interpreter {
             ))),
         }
     }
+
+    fn expect_datetime_arg(
+        &self,
+        value: &Value,
+        func: &str,
+        arg: &str,
+    ) -> Result<DateTime<FixedOffset>, RuntimeError> {
+        match value {
+            Value::DateTime(dt) => Ok(dt.clone()),
+            _ => Err(RuntimeError::TypeError(format!(
+                "{func}() {arg} must be datetime"
+            ))),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2617,14 +2796,15 @@ impl Interpreter {
 // ---------------------------------------------------------------------------
 
 /// Convert an AST `Literal` to a runtime `Value`.
-fn literal_to_value(lit: Literal) -> Value {
+fn literal_to_value(lit: Literal) -> Result<Value, RuntimeError> {
     match lit {
-        Literal::Integer(n) => Value::Integer(n),
-        Literal::Float(f) => Value::Float(f),
-        Literal::Str(s) => Value::Str(s),
-        Literal::Currency(c) => Value::Currency(c),
-        Literal::Boolean(b) => Value::Boolean(b),
-        Literal::Null => Value::Null,
+        Literal::Integer(n) => Ok(Value::Integer(n)),
+        Literal::Float(f) => Ok(Value::Float(f)),
+        Literal::Str(s) => Ok(Value::Str(s)),
+        Literal::Currency(c) => Ok(Value::Currency(c)),
+        Literal::Boolean(b) => Ok(Value::Boolean(b)),
+        Literal::DateTime(s) => parse_datetime_literal(&s).map(Value::DateTime),
+        Literal::Null => Ok(Value::Null),
     }
 }
 
@@ -2639,6 +2819,9 @@ fn value_to_json(val: Value) -> Result<serde_json::Value, RuntimeError> {
         Value::Boolean(b) => Ok(serde_json::Value::Bool(b)),
         Value::Json(j) => Ok(j),
         Value::Null => Ok(serde_json::Value::Null),
+        Value::DateTime(dt) => Ok(serde_json::Value::String(
+            dt.to_rfc3339_opts(SecondsFormat::Secs, true),
+        )),
         Value::Currency(c) => {
             let f = c as f64 / 100.0;
             serde_json::Number::from_f64(f)
@@ -2708,6 +2891,7 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Str(x), Value::Str(y)) => x == y,
         (Value::Boolean(x), Value::Boolean(y)) => x == y,
         (Value::Currency(x), Value::Currency(y)) => x == y,
+        (Value::DateTime(x), Value::DateTime(y)) => x == y,
         (Value::Null, Value::Null) => true,
         _ => false,
     }
@@ -2722,6 +2906,7 @@ fn compare_values(a: &Value, op: &CmpOp, b: &Value) -> Result<bool, RuntimeError
         (Value::Float(x), Value::Integer(y)) => Ok(apply_cmp_f(*x, op, *y as f64)),
         (Value::Str(x), Value::Str(y)) => Ok(apply_cmp_ord(x.as_str(), op, y.as_str())),
         (Value::Currency(x), Value::Currency(y)) => Ok(apply_cmp(*x, op, *y)),
+        (Value::DateTime(x), Value::DateTime(y)) => Ok(apply_cmp(x, op, y)),
         _ => Err(RuntimeError::TypeError(format!(
             "cannot compare {} with {}",
             a.type_name(),
@@ -2794,6 +2979,68 @@ fn parse_duration_ms_str(s: &str) -> Result<u64, RuntimeError> {
     ))
 }
 
+fn parse_datetime_literal(s: &str) -> Result<DateTime<FixedOffset>, RuntimeError> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err(RuntimeError::TypeError("empty datetime literal".to_string()));
+    }
+
+    let mut candidate = trimmed.to_string();
+    if !candidate.contains('T') {
+        if let Some(space_pos) = candidate.find(' ') {
+            candidate.replace_range(space_pos..=space_pos, "T");
+        }
+    }
+
+    if candidate.len() < 19 {
+        return Err(RuntimeError::TypeError(format!("invalid datetime '{trimmed}'")));
+    }
+
+    let time_start = 10;
+    let has_offset = candidate.ends_with('Z')
+        || candidate[time_start..].contains('+')
+        || candidate[time_start..].contains('-');
+
+    if has_offset {
+        return DateTime::parse_from_rfc3339(&candidate).map_err(|_| {
+            RuntimeError::TypeError(format!("invalid datetime '{trimmed}'"))
+        });
+    }
+
+    let naive = NaiveDateTime::parse_from_str(&candidate, "%Y-%m-%dT%H:%M:%S")
+        .map_err(|_| RuntimeError::TypeError(format!("invalid datetime '{trimmed}'")))?;
+    let offset = *Local::now().offset();
+    offset
+        .from_local_datetime(&naive)
+        .single()
+        .ok_or_else(|| RuntimeError::TypeError(format!("invalid datetime '{trimmed}'")))
+}
+
+fn datetime_from_timestamp_ms(ms: i64) -> Result<DateTime<FixedOffset>, RuntimeError> {
+    let secs = ms.div_euclid(1_000);
+    let nsec = (ms.rem_euclid(1_000) as u32) * 1_000_000;
+    let utc = DateTime::<Utc>::from_timestamp(secs, nsec).ok_or_else(|| {
+        RuntimeError::TypeError(format!("invalid timestamp '{ms}'"))
+    })?;
+    let offset = FixedOffset::east_opt(0).ok_or_else(|| {
+        RuntimeError::TypeError("invalid UTC offset".to_string())
+    })?;
+    Ok(utc.with_timezone(&offset))
+}
+
+fn format_datetime(dt: &DateTime<FixedOffset>, fmt: &str) -> String {
+    let mut pattern = fmt.to_string();
+    pattern = pattern.replace("YYYY", "%Y");
+    pattern = pattern.replace("MM", "%m");
+    pattern = pattern.replace("DD", "%d");
+    pattern = pattern.replace("HH", "%H");
+    pattern = pattern.replace("mm", "%M");
+    pattern = pattern.replace("SS", "%S");
+    pattern = pattern.replace("ZZ", "%:z");
+    pattern = pattern.replace("Z", "%z");
+    dt.format(&pattern).to_string()
+}
+
 fn apply_cmp<T: PartialOrd>(a: T, op: &CmpOp, b: T) -> bool {
     match op {
         CmpOp::Lt => a < b,
@@ -2861,6 +3108,12 @@ fn eval_arith(l: Value, r: Value, op: ArithOp) -> Result<Value, RuntimeError> {
                 ArithOp::Mul => Ok(Value::Float(cf * n as f64)),
             }
         }
+        (Value::DateTime(a), Value::DateTime(b)) if matches!(op, ArithOp::Sub) => {
+            Ok(Value::Integer(a.timestamp_millis() - b.timestamp_millis()))
+        }
+        (Value::DateTime(a), Value::Integer(ms)) if matches!(op, ArithOp::Sub) => {
+            Ok(Value::DateTime(a - ChronoDuration::milliseconds(ms)))
+        }
         (a, b) => Err(RuntimeError::TypeError(format!(
             "arithmetic type mismatch: {} and {}",
             a.type_name(),
@@ -2897,6 +3150,12 @@ fn eval_add(l: Value, r: Value) -> Result<Value, RuntimeError> {
         }
         (Value::Currency(c), Value::Integer(n)) | (Value::Integer(n), Value::Currency(c)) => {
             Ok(Value::Float(currency_as_float(c) + n as f64))
+        }
+        (Value::DateTime(dt), Value::Integer(ms)) => {
+            Ok(Value::DateTime(dt + ChronoDuration::milliseconds(ms)))
+        }
+        (Value::Integer(ms), Value::DateTime(dt)) => {
+            Ok(Value::DateTime(dt + ChronoDuration::milliseconds(ms)))
         }
         (a, b) => Err(RuntimeError::TypeError(format!(
             "add type mismatch: {} and {}",
@@ -3075,6 +3334,9 @@ fn cast_value(val: Value, target: &str) -> Result<Value, RuntimeError> {
             Value::Float(f) => Ok(Value::Integer(f.trunc() as i64)),
             Value::Boolean(b) => Ok(Value::Integer(if b { 1 } else { 0 })),
             Value::Currency(c) => Ok(Value::Integer(c / 100)),
+            Value::DateTime(_) => Err(RuntimeError::TypeError(
+                "cannot cast datetime to integer".to_string(),
+            )),
             Value::Str(s) => s.parse::<i64>().map(Value::Integer).map_err(|_| {
                 RuntimeError::TypeError(format!("cannot cast string '{s}' to integer"))
             }),
@@ -3138,6 +3400,15 @@ fn cast_value(val: Value, target: &str) -> Result<Value, RuntimeError> {
                 v.type_name()
             ))),
         },
+        "datetime" => match val {
+            Value::DateTime(dt) => Ok(Value::DateTime(dt)),
+            Value::Str(s) => parse_datetime_literal(&s).map(Value::DateTime),
+            Value::Null => Err(RuntimeError::NullError("cast null to datetime".to_string())),
+            v => Err(RuntimeError::TypeError(format!(
+                "cannot cast {} to datetime",
+                v.type_name()
+            ))),
+        },
         t => Err(RuntimeError::TypeError(format!("unknown cast target: {t}"))),
     }
 }
@@ -3168,6 +3439,7 @@ fn coerce_string_to_type(s: &str, typ: &RundellType) -> Result<Value, RuntimeErr
         RundellType::Json => serde_json::from_str(s)
             .map(Value::Json)
             .map_err(|_| RuntimeError::TypeError(format!("cannot coerce '{s}' to json"))),
+        RundellType::DateTime => parse_datetime_literal(s).map(Value::DateTime),
     }
 }
 
@@ -3179,6 +3451,7 @@ fn runtime_error_name(err: &RuntimeError) -> String {
         RuntimeError::IndexError(_) => "IndexError".to_string(),
         RuntimeError::DivisionError => "DivisionError".to_string(),
         RuntimeError::IOError(_) => "IOError".to_string(),
+        RuntimeError::PermissionError { .. } => "PermissionError".to_string(),
         RuntimeError::RuntimeError(_) => "RuntimeError".to_string(),
         RuntimeError::ReturnValue(_) => "ReturnValue".to_string(),
         RuntimeError::QueryTimeout { .. } => "QueryTimeout".to_string(),
@@ -3214,6 +3487,18 @@ fn is_builtin(name: &str) -> bool {
             | "upper"
             | "lower"
             | "trim"
+            | "execute"
+            | "os"
+            | "now"
+            | "day"
+            | "month"
+            | "year"
+            | "hour"
+            | "minute"
+            | "second"
+            | "dateformat"
+            | "timestamp"
+            | "fromtimestamp"
             | "string"
             | "append"
             | "env"
@@ -3224,6 +3509,54 @@ fn is_builtin(name: &str) -> bool {
             | "read_csv"
             | "write_csv"
     )
+}
+
+fn has_mixed_separators(path: &str) -> bool {
+    path.contains('/') && path.contains('\\')
+}
+
+fn find_executable_in_path(name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    let paths = std::env::split_paths(&path_var);
+
+    #[cfg(windows)]
+    let candidates: Vec<String> = {
+        let has_ext = Path::new(name).extension().is_some();
+        if has_ext {
+            vec![name.to_string()]
+        } else {
+            let pathext = std::env::var_os("PATHEXT")
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let mut list = Vec::new();
+            if pathext.is_empty() {
+                list.push(format!("{name}.exe"));
+            } else {
+                for ext in pathext.split(';') {
+                    let ext = ext.trim();
+                    if ext.is_empty() {
+                        continue;
+                    }
+                    list.push(format!("{name}{ext}"));
+                }
+            }
+            list
+        }
+    };
+
+    #[cfg(not(windows))]
+    let candidates: Vec<String> = vec![name.to_string()];
+
+    for dir in paths {
+        for candidate in &candidates {
+            let full = dir.join(candidate);
+            if full.is_file() {
+                return Some(full);
+            }
+        }
+    }
+    None
 }
 
 fn json_value_to_csv(value: &serde_json::Value) -> String {

@@ -101,6 +101,15 @@ fn parse_string(lex: &mut Lexer<Token>) -> Option<String> {
     Some(out)
 }
 
+/// Parse a datetime literal delimited by `|...|`.
+fn parse_datetime(lex: &mut Lexer<Token>) -> Option<String> {
+    let raw = lex.slice();
+    if raw.len() < 2 {
+        return None;
+    }
+    Some(raw[1..raw.len() - 1].to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Token enum
 // ---------------------------------------------------------------------------
@@ -152,6 +161,10 @@ pub enum Token {
     #[regex(r#""([^"\\]|\\.|\n)*""#, parse_string)]
     #[regex(r#"'([^'\\]|\\.|\n)*'"#, parse_string)]
     StringLit(String),
+
+    /// A datetime literal delimited by `|` in ISO 8601 format.
+    #[regex(r"\|[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|[+-][0-9]{2}:[0-9]{2})?\|", parse_datetime)]
+    DateTimeLit(String),
 
     /// Boolean `true` (matches `true`, `TRUE`, `yes`, `YES`).
     #[token("true")]
@@ -275,6 +288,9 @@ pub enum Token {
     /// `json` type keyword
     #[token("json")]
     KwJson,
+    /// `datetime` type keyword
+    #[token("datetime")]
+    KwDateTime,
 
     /// `cast` built-in
     #[token("cast")]
@@ -309,6 +325,42 @@ pub enum Token {
     /// `trim` built-in
     #[token("trim")]
     Trim,
+    /// `execute` built-in
+    #[token("execute")]
+    Execute,
+    /// `os` built-in
+    #[token("os")]
+    Os,
+    /// `now` built-in
+    #[token("now")]
+    Now,
+    /// `day` built-in
+    #[token("day")]
+    Day,
+    /// `month` built-in
+    #[token("month")]
+    Month,
+    /// `year` built-in
+    #[token("year")]
+    Year,
+    /// `hour` built-in
+    #[token("hour")]
+    Hour,
+    /// `minute` built-in
+    #[token("minute")]
+    Minute,
+    /// `second` built-in
+    #[token("second")]
+    Second,
+    /// `dateformat` built-in
+    #[token("dateformat")]
+    DateFormat,
+    /// `timestamp` built-in
+    #[token("timestamp")]
+    Timestamp,
+    /// `fromtimestamp` built-in
+    #[token("fromtimestamp")]
+    FromTimestamp,
     /// `append` built-in / statement
     #[token("append")]
     Append,
@@ -627,6 +679,14 @@ mod tests {
     }
 
     #[test]
+    fn datetime_literal() {
+        let toks = tokens("|2026-04-04 17:41:44|");
+        assert_eq!(toks, vec![Token::DateTimeLit("2026-04-04 17:41:44".to_string())]);
+        let toks = tokens("|2026-04-04T17:41:44-12:00|");
+        assert_eq!(toks, vec![Token::DateTimeLit("2026-04-04T17:41:44-12:00".to_string())]);
+    }
+
+    #[test]
     fn bool_true_variants() {
         for s in &["true", "TRUE", "yes", "YES"] {
             assert_eq!(tokens(s), vec![Token::BoolTrue], "failed for {s}");
@@ -676,6 +736,7 @@ mod tests {
             ("currency", Token::KwCurrency),
             ("boolean", Token::KwBoolean),
             ("json", Token::KwJson),
+            ("datetime", Token::KwDateTime),
             ("cast", Token::Cast),
             ("length", Token::Length),
             ("newline", Token::Newline),
@@ -687,6 +748,19 @@ mod tests {
             ("upper", Token::Upper),
             ("lower", Token::Lower),
             ("trim", Token::Trim),
+            ("execute", Token::Execute),
+            ("os", Token::Os),
+            ("execute", Token::Execute),
+            ("now", Token::Now),
+            ("day", Token::Day),
+            ("month", Token::Month),
+            ("year", Token::Year),
+            ("hour", Token::Hour),
+            ("minute", Token::Minute),
+            ("second", Token::Second),
+            ("dateformat", Token::DateFormat),
+            ("timestamp", Token::Timestamp),
+            ("fromtimestamp", Token::FromTimestamp),
             ("append", Token::Append),
             ("remove", Token::Remove),
             ("returns", Token::Returns),
