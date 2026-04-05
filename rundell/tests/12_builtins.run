@@ -1,0 +1,53 @@
+define a as integer = 3.
+define b as integer = 7.
+print string(min(a, b)) + newline().
+print string(max(a, b)) + newline().
+print string(clamp(10, 1, 5)) + newline().
+print string(sqrt(9)) + newline().
+print string(pow(2, 8)) + newline().
+
+define s as string = "alpha,beta,gamma".
+define parts as json = split(s, ",").
+print parts[0] + newline().
+print string(length(parts)) + newline().
+print join(parts, "|") + newline().
+print string(startswith(s, "alpha")) + newline().
+print string(endswith(s, "gamma")) + newline().
+print string(contains(s, "beta")) + newline().
+print replace(s, ",", ";") + newline().
+
+define obj as json = { "a": 1, "b": 2 }.
+print string(has_key(obj, "a")) + newline().
+print string(length(keys(obj))) + newline().
+print string(length(values(obj))) + newline().
+
+define arrObj as json = { "rows": [1, 2, 3] }.
+define arr as json = arrObj["rows"].
+remove_at(arr, 1).
+print string(arr[1]) + newline().
+
+define x as integer.
+print string(isnull(x)) + newline().
+print type(x) + newline().
+set x = 5.
+print type(x) + newline().
+
+define dirPath as string = "tmp_rundell_test_dir".
+mkdir(dirPath).
+print string(exists(dirPath)) + newline().
+delete(dirPath).
+print string(exists(dirPath)) + newline().
+
+sleep(1).
+
+define dt as datetime = |2026-04-05T00:00:00-05:00|.
+print string(dayofweek(dt)) + newline().
+
+define dt2 as datetime = adddays(dt, 2).
+print dateformat("YYYY-MM-DD", dt2) + newline().
+
+define dt3 as datetime = addhours(dt, 5).
+print dateformat("HH", dt3) + newline().
+
+print string(diffdays(dt2, dt)) + newline().
+print timezone(dt) + newline().

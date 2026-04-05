@@ -106,4 +106,13 @@ mod tests {
         let out = run_capture(include_str!("../../../tests/10_error_handling.run"));
         assert_eq!(out, "caught null error\nfinally ran\n");
     }
+
+    #[test]
+    fn test_builtins() {
+        let out = run_capture(include_str!("../../../tests/12_builtins.run"));
+        assert_eq!(
+            out,
+            "3\n7\n5\n3.0\n256\nalpha\n3\nalpha|beta|gamma\ntrue\ntrue\ntrue\nalpha;beta;gamma\ntrue\n2\n2\n3\ntrue\nnull\ninteger\ntrue\nfalse\n7\n2026-04-07\n05\n2\n-05:00\n"
+        );
+    }
 }

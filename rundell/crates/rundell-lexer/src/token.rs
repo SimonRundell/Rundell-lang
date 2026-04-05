@@ -331,6 +331,72 @@ pub enum Token {
     /// `os` built-in
     #[token("os")]
     Os,
+    /// `min` built-in
+    #[token("min")]
+    Min,
+    /// `max` built-in
+    #[token("max")]
+    Max,
+    /// `sqrt` built-in
+    #[token("sqrt")]
+    Sqrt,
+    /// `pow` built-in
+    #[token("pow")]
+    Pow,
+    /// `clamp` built-in
+    #[token("clamp")]
+    Clamp,
+    /// `replace` built-in
+    #[token("replace")]
+    Replace,
+    /// `split` built-in
+    #[token("split")]
+    Split,
+    /// `join` built-in
+    #[token("join")]
+    Join,
+    /// `startswith` built-in
+    #[token("startswith")]
+    StartsWith,
+    /// `endswith` built-in
+    #[token("endswith")]
+    EndsWith,
+    /// `contains` built-in
+    #[token("contains")]
+    Contains,
+    /// `keys` built-in
+    #[token("keys")]
+    Keys,
+    /// `values` built-in
+    #[token("values")]
+    Values,
+    /// `has_key` built-in
+    #[token("has_key")]
+    HasKey,
+    /// `remove_at` built-in
+    #[token("remove_at")]
+    RemoveAt,
+    /// `type` built-in
+    #[token("type")]
+    Type,
+    /// `isnull` built-in
+    #[token("isnull")]
+    IsNull,
+    /// `exists` built-in
+    #[token("exists")]
+    Exists,
+    /// `delete` built-in
+    #[token("delete")]
+    Delete,
+    /// `mkdir` built-in
+    #[token("mkdir")]
+    Mkdir,
+    /// `sleep` built-in
+    #[token("sleep")]
+    Sleep,
+    /// `env_exists` built-in
+    #[token("env_exists")]
+    EnvExists,
     /// `now` built-in
     #[token("now")]
     Now,
@@ -361,6 +427,21 @@ pub enum Token {
     /// `fromtimestamp` built-in
     #[token("fromtimestamp")]
     FromTimestamp,
+    /// `dayofweek` built-in
+    #[token("dayofweek")]
+    DayOfWeek,
+    /// `adddays` built-in
+    #[token("adddays")]
+    AddDays,
+    /// `addhours` built-in
+    #[token("addhours")]
+    AddHours,
+    /// `diffdays` built-in
+    #[token("diffdays")]
+    DiffDays,
+    /// `timezone` built-in
+    #[token("timezone")]
+    Timezone,
     /// `append` built-in / statement
     #[token("append")]
     Append,
@@ -730,6 +811,28 @@ mod tests {
             ("try", Token::Try),
             ("catch", Token::Catch),
             ("finally", Token::Finally),
+            ("min", Token::Min),
+            ("max", Token::Max),
+            ("sqrt", Token::Sqrt),
+            ("pow", Token::Pow),
+            ("clamp", Token::Clamp),
+            ("replace", Token::Replace),
+            ("split", Token::Split),
+            ("join", Token::Join),
+            ("startswith", Token::StartsWith),
+            ("endswith", Token::EndsWith),
+            ("contains", Token::Contains),
+            ("keys", Token::Keys),
+            ("values", Token::Values),
+            ("has_key", Token::HasKey),
+            ("remove_at", Token::RemoveAt),
+            ("type", Token::Type),
+            ("isnull", Token::IsNull),
+            ("exists", Token::Exists),
+            ("delete", Token::Delete),
+            ("mkdir", Token::Mkdir),
+            ("sleep", Token::Sleep),
+            ("env_exists", Token::EnvExists),
             ("integer", Token::KwInteger),
             ("float", Token::KwFloat),
             ("string", Token::KwString),
@@ -740,6 +843,11 @@ mod tests {
             ("cast", Token::Cast),
             ("length", Token::Length),
             ("newline", Token::Newline),
+            ("dayofweek", Token::DayOfWeek),
+            ("adddays", Token::AddDays),
+            ("addhours", Token::AddHours),
+            ("diffdays", Token::DiffDays),
+            ("timezone", Token::Timezone),
             ("abs", Token::Abs),
             ("floor", Token::Floor),
             ("ceil", Token::Ceil),

@@ -1,0 +1,42 @@
+# builtins.run
+# Demonstrates utility built-ins introduced in 0.1.5.
+
+print "OS: " + os() + newline().
+print "Min/Max: " + string(min(3, 7)) + ", " + string(max(3, 7)) + newline().
+print "Clamp: " + string(clamp(10, 1, 5)) + newline().
+print "Sqrt: " + string(sqrt(9)) + newline().
+print "Pow: " + string(pow(2, 8)) + newline().
+
+define s as string = "alpha,beta,gamma".
+print join(split(s, ","), "|") + newline().
+print replace(s, ",", ";") + newline().
+print string(startswith(s, "alpha")) + newline().
+print string(endswith(s, "gamma")) + newline().
+print string(contains(s, "beta")) + newline().
+
+define obj as json = { "rows": ["a", "b", "c"], "flag": true }.
+print string(has_key(obj, "rows")) + newline().
+print string(length(keys(obj))) + newline().
+print string(length(values(obj))) + newline().
+
+define arr as json = obj["rows"].
+remove_at(arr, 1).
+print arr[1] + newline().
+
+print type(arr) + newline().
+print string(isnull(arr)) + newline().
+
+define dirPath as string = "tmp_rundell_builtins".
+mkdir(dirPath).
+print string(exists(dirPath)) + newline().
+delete(dirPath).
+print string(exists(dirPath)) + newline().
+
+sleep(1).
+
+define dt as datetime = |2026-04-05T00:00:00-05:00|.
+print string(dayofweek(dt)) + newline().
+print dateformat("YYYY-MM-DD", adddays(dt, 2)) + newline().
+print dateformat("HH", addhours(dt, 5)) + newline().
+print string(diffdays(adddays(dt, 2), dt)) + newline().
+print timezone(dt) + newline().

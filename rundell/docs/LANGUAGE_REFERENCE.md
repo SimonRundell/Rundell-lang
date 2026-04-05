@@ -321,6 +321,28 @@ All built-ins are expressions and can appear anywhere a value is expected.
 | `trim(str)` | string | Strip leading and trailing whitespace |
 | `execute(path)` | null | Execute a program or script; stdout/stderr forward to CLI |
 | `os()` | string | Returns `"windows"`, `"macos"`, `"linux"`, or `"unknown"` |
+| `min(a, b)` | number | Minimum of two numbers |
+| `max(a, b)` | number | Maximum of two numbers |
+| `sqrt(n)` | float | Square root |
+| `pow(a, b)` | number | Exponentiation (same rules as `**`) |
+| `clamp(n, lo, hi)` | number | Clamp within range |
+| `replace(str, find, repl)` | string | Replace all occurrences |
+| `split(str, delim)` | json | Split string into array of strings |
+| `join(arr, delim)` | string | Join string array with delimiter |
+| `startswith(str, prefix)` | boolean | True if string starts with prefix |
+| `endswith(str, suffix)` | boolean | True if string ends with suffix |
+| `contains(str, substr)` | boolean | True if string contains substring |
+| `keys(obj)` | json | Array of keys from a json object |
+| `values(obj)` | json | Array of values from a json object |
+| `has_key(obj, key)` | boolean | True if json object has key |
+| `remove_at(arr, index)` | null | Remove element at index from a json array |
+| `type(expr)` | string | Returns the runtime type name |
+| `isnull(expr)` | boolean | True if value is null |
+| `exists(path)` | boolean | True if a file or directory exists |
+| `delete(path)` | null | Delete a file or directory |
+| `mkdir(path)` | null | Create a directory (recursive) |
+| `sleep(ms)` | null | Pause execution for milliseconds |
+| `env_exists(key)` | boolean | True if key exists in `.rundell.env` |
 | `now()` | datetime | Current local datetime with offset |
 | `day(datetime)` | integer | Day of month (1-31) |
 | `month(datetime)` | integer | Month (1-12) |
@@ -331,6 +353,11 @@ All built-ins are expressions and can appear anywhere a value is expected.
 | `dateformat(format, datetime)` | string | Format datetime using ISO tokens (`YYYY`, `MM`, `DD`, `HH`, `mm`, `SS`, `ZZ`) |
 | `timestamp(datetime)` | integer | Milliseconds since Unix epoch |
 | `fromtimestamp(ms)` | datetime | Datetime from Unix epoch milliseconds (UTC) |
+| `dayofweek(datetime)` | integer | ISO weekday (Mon=1 .. Sun=7) |
+| `adddays(datetime, n)` | datetime | Add days |
+| `addhours(datetime, n)` | datetime | Add hours |
+| `diffdays(a, b)` | integer | Whole-day difference |
+| `timezone(datetime)` | string | Offset string like `+01:00` |
 | `append(collection, value)` | null | Append element to a json array (mutates in place) |
 | `read_text(path)` | string | Read a UTF-8 text file |
 | `write_text(path, content)` | null | Write a UTF-8 text file (overwrites) |
@@ -340,6 +367,15 @@ All built-ins are expressions and can appear anywhere a value is expected.
 | `write_csv(path, rows, include_headers)` | null | Write CSV from a json array |
 
 ---
+
+Example:
+
+```
+print string(min(3, 7)) + newline().
+print replace("a,b,c", ",", ";") + newline().
+print join(split("a,b,c", ","), "|") + newline().
+print type(now()) + newline().
+```
 
 `execute(path)` rules:
 - If `path` contains `/` or `\`, it is resolved relative to the running `.run` file directory.
@@ -1101,7 +1137,10 @@ integer  float  string  currency  boolean  json
 datetime
 cast  length  newline  abs  floor  ceil  round
 substr  upper  lower  trim  now  day  month  year  hour  minute  second
-dateformat  timestamp  fromtimestamp  execute  os  append  remove
+dateformat  timestamp  fromtimestamp  dayofweek  adddays  addhours  diffdays  timezone
+execute  os  min  max  sqrt  pow  clamp  replace  split  join  startswith  endswith  contains
+keys  values  has_key  remove_at  type  isnull  exists  delete  mkdir  sleep  env_exists
+append  remove
 returns
 
 # GUI keywords

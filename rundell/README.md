@@ -180,6 +180,7 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 | [`examples/temperature_converter.run`](examples/temperature_converter.run) | Console °C ↔ °F converter |
 | [`examples/string_utils.run`](examples/string_utils.run) | String manipulation demos |
 | [`examples/datetime_basics.run`](examples/datetime_basics.run) | Datetime literals, arithmetic, and formatting |
+| [`examples/builtins.run`](examples/builtins.run) | Utility built-ins (math, string, json, file, datetime) |
 | [`examples/execute_basics.run`](examples/execute_basics.run) | Execute external programs via PATH or relative paths |
 | [`examples/execute_cross_platform.run`](examples/execute_cross_platform.run) | Execute external programs on different OSes |
 | [`examples/contact_book.run`](examples/contact_book.run) | In-memory contact list |
@@ -216,7 +217,8 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 - Datetime built-ins: `now`, `day`, `month`, `year`, `hour`, `minute`, `second`, `dateformat`
 - Datetime arithmetic support (`datetime +/- integer`, `datetime - datetime`)
 - Execute external programs with `execute(path)`
-- New examples: datetime basics, execute basics, and GUI clock
+- New utility built-ins (math, string, json, file/path, datetime)
+- New examples: datetime basics, built-ins, execute basics, and GUI clock
 
 ## What's New in 0.1.4
 

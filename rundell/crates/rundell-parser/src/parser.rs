@@ -263,8 +263,58 @@ impl Parser {
             // `dialog\openfile(...)` etc. as a bare statement (result discarded)
             Some(Token::KwDialog) => self.parse_expr_stmt(),
             // Built-ins that can appear as standalone statements
-            Some(Token::Execute) => self.parse_expr_stmt(),
-            Some(Token::Os) => self.parse_expr_stmt(),
+            Some(Token::Cast)
+            | Some(Token::Length)
+            | Some(Token::Newline)
+            | Some(Token::Abs)
+            | Some(Token::Floor)
+            | Some(Token::Ceil)
+            | Some(Token::Round)
+            | Some(Token::Substr)
+            | Some(Token::Upper)
+            | Some(Token::Lower)
+            | Some(Token::Trim)
+            | Some(Token::Execute)
+            | Some(Token::Os)
+            | Some(Token::Min)
+            | Some(Token::Max)
+            | Some(Token::Sqrt)
+            | Some(Token::Pow)
+            | Some(Token::Clamp)
+            | Some(Token::Replace)
+            | Some(Token::Split)
+            | Some(Token::Join)
+            | Some(Token::StartsWith)
+            | Some(Token::EndsWith)
+            | Some(Token::Contains)
+            | Some(Token::Keys)
+            | Some(Token::Values)
+            | Some(Token::HasKey)
+            | Some(Token::RemoveAt)
+            | Some(Token::Type)
+            | Some(Token::IsNull)
+            | Some(Token::Exists)
+            | Some(Token::Delete)
+            | Some(Token::Mkdir)
+            | Some(Token::Sleep)
+            | Some(Token::EnvExists)
+            | Some(Token::Now)
+            | Some(Token::Day)
+            | Some(Token::Month)
+            | Some(Token::Year)
+            | Some(Token::Hour)
+            | Some(Token::Minute)
+            | Some(Token::Second)
+            | Some(Token::DateFormat)
+            | Some(Token::Timestamp)
+            | Some(Token::FromTimestamp)
+            | Some(Token::DayOfWeek)
+            | Some(Token::AddDays)
+            | Some(Token::AddHours)
+            | Some(Token::DiffDays)
+            | Some(Token::Timezone)
+            | Some(Token::KwString)
+            | Some(Token::KwEnv) => self.parse_expr_stmt(),
             Some(t) => {
                 let t = t.clone();
                 Err(ParseError::UnexpectedToken {
@@ -1258,6 +1308,28 @@ impl Parser {
             Some(Token::Trim) => self.parse_builtin_call("trim"),
             Some(Token::Execute) => self.parse_builtin_call("execute"),
             Some(Token::Os) => self.parse_builtin_call("os"),
+            Some(Token::Min) => self.parse_builtin_call("min"),
+            Some(Token::Max) => self.parse_builtin_call("max"),
+            Some(Token::Sqrt) => self.parse_builtin_call("sqrt"),
+            Some(Token::Pow) => self.parse_builtin_call("pow"),
+            Some(Token::Clamp) => self.parse_builtin_call("clamp"),
+            Some(Token::Replace) => self.parse_builtin_call("replace"),
+            Some(Token::Split) => self.parse_builtin_call("split"),
+            Some(Token::Join) => self.parse_builtin_call("join"),
+            Some(Token::StartsWith) => self.parse_builtin_call("startswith"),
+            Some(Token::EndsWith) => self.parse_builtin_call("endswith"),
+            Some(Token::Contains) => self.parse_builtin_call("contains"),
+            Some(Token::Keys) => self.parse_builtin_call("keys"),
+            Some(Token::Values) => self.parse_builtin_call("values"),
+            Some(Token::HasKey) => self.parse_builtin_call("has_key"),
+            Some(Token::RemoveAt) => self.parse_builtin_call("remove_at"),
+            Some(Token::Type) => self.parse_builtin_call("type"),
+            Some(Token::IsNull) => self.parse_builtin_call("isnull"),
+            Some(Token::Exists) => self.parse_builtin_call("exists"),
+            Some(Token::Delete) => self.parse_builtin_call("delete"),
+            Some(Token::Mkdir) => self.parse_builtin_call("mkdir"),
+            Some(Token::Sleep) => self.parse_builtin_call("sleep"),
+            Some(Token::EnvExists) => self.parse_builtin_call("env_exists"),
             Some(Token::Now) => self.parse_builtin_call("now"),
             Some(Token::Day) => self.parse_builtin_call("day"),
             Some(Token::Month) => self.parse_builtin_call("month"),
@@ -1268,6 +1340,11 @@ impl Parser {
             Some(Token::DateFormat) => self.parse_builtin_call("dateformat"),
             Some(Token::Timestamp) => self.parse_builtin_call("timestamp"),
             Some(Token::FromTimestamp) => self.parse_builtin_call("fromtimestamp"),
+            Some(Token::DayOfWeek) => self.parse_builtin_call("dayofweek"),
+            Some(Token::AddDays) => self.parse_builtin_call("adddays"),
+            Some(Token::AddHours) => self.parse_builtin_call("addhours"),
+            Some(Token::DiffDays) => self.parse_builtin_call("diffdays"),
+            Some(Token::Timezone) => self.parse_builtin_call("timezone"),
             Some(Token::KwString) => self.parse_builtin_call("string"),
             Some(Token::Append) => self.parse_builtin_call("append"),
             // REST / query built-ins

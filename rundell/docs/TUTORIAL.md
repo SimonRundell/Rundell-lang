@@ -34,6 +34,7 @@ This tutorial takes you from zero to a working knowledge of Rundell — includin
 26. [REST Data in a GUI Listbox](#26-rest-data-in-a-gui-listbox)
 27. [File I/O](#27-file-io)
 28. [Executing External Programs](#28-executing-external-programs)
+29. [Utility Built-ins](#29-utility-built-ins)
 
 ---
 
@@ -1128,6 +1129,70 @@ execute("tools\my_tool.exe").
 - Do not mix `/` and `\` in the same path.
 - If permissions are insufficient, a `PermissionError` is raised.
 - Any stdout/stderr from the program is forwarded to the Rundell CLI.
+
+---
+
+## 29. Utility Built-ins
+
+### Math
+
+```
+print string(min(3, 7)) + newline().
+print string(max(3, 7)) + newline().
+print string(clamp(10, 1, 5)) + newline().
+print string(sqrt(9)) + newline().
+print string(pow(2, 8)) + newline().
+```
+
+### Strings
+
+```
+define s as string = "alpha,beta,gamma".
+print join(split(s, ","), "|") + newline().
+print replace(s, ",", ";") + newline().
+print string(startswith(s, "alpha")) + newline().
+print string(endswith(s, "gamma")) + newline().
+print string(contains(s, "beta")) + newline().
+```
+
+### JSON helpers
+
+```
+define obj as json = { "rows": ["a", "b", "c"], "flag": true }.
+print string(has_key(obj, "rows")) + newline().
+print string(length(keys(obj))) + newline().
+print string(length(values(obj))) + newline().
+
+define arr as json = obj["rows"].
+remove_at(arr, 1).
+print arr[1] + newline().
+```
+
+### Type and file helpers
+
+```
+print type(obj) + newline().
+print string(isnull(obj)) + newline().
+
+define dirPath as string = "tmp_rundell_demo".
+mkdir(dirPath).
+print string(exists(dirPath)) + newline().
+delete(dirPath).
+print string(exists(dirPath)) + newline().
+
+sleep(1).
+```
+
+### Datetime helpers
+
+```
+define dt as datetime = |2026-04-05T00:00:00-05:00|.
+print string(dayofweek(dt)) + newline().
+print dateformat("YYYY-MM-DD", adddays(dt, 2)) + newline().
+print dateformat("HH", addhours(dt, 5)) + newline().
+print string(diffdays(adddays(dt, 2), dt)) + newline().
+print timezone(dt) + newline().
+```
 
 ---
 

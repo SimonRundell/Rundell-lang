@@ -993,6 +993,71 @@ impl Interpreter {
         Ok(Value::Null)
     }
 
+    fn exec_remove_at(&mut self, col_expr: Expr, idx_expr: Expr) -> Result<Value, RuntimeError> {
+        let idx_val = self.eval_expr(idx_expr)?;
+        let idx = match idx_val {
+            Value::Integer(n) if n >= 0 => n as usize,
+            _ => {
+                return Err(RuntimeError::TypeError(
+                    "remove_at() index must be a non-negative integer".to_string(),
+                ))
+            }
+        };
+
+        let root_name = Self::find_root_ident(&col_expr)?;
+        let mut path = Vec::new();
+        Self::collect_index_path(&col_expr, &mut path);
+
+        let mut root_json = match self.env.get(&root_name)?.clone() {
+            Value::Json(j) => j,
+            _ => {
+                return Err(RuntimeError::TypeError(
+                    "remove_at target is not a json collection".to_string(),
+                ))
+            }
+        };
+
+        if path.is_empty() {
+            match &mut root_json {
+                serde_json::Value::Array(arr) => {
+                    if idx < arr.len() {
+                        arr.remove(idx);
+                    } else {
+                        return Err(RuntimeError::IndexError(format!(
+                            "index {idx} out of bounds for remove_at"
+                        )));
+                    }
+                }
+                _ => {
+                    return Err(RuntimeError::TypeError(
+                        "remove_at target is not a json array".to_string(),
+                    ))
+                }
+            }
+        } else {
+            let parent = Self::json_navigate_mut_simple(&mut root_json, &path)?;
+            match parent {
+                serde_json::Value::Array(arr) => {
+                    if idx < arr.len() {
+                        arr.remove(idx);
+                    } else {
+                        return Err(RuntimeError::IndexError(format!(
+                            "index {idx} out of bounds for remove_at"
+                        )));
+                    }
+                }
+                _ => {
+                    return Err(RuntimeError::TypeError(
+                        "remove_at target is not a json array".to_string(),
+                    ))
+                }
+            }
+        }
+
+        self.env.set(&root_name, Value::Json(root_json))?;
+        Ok(Value::Null)
+    }
+
     /// Run a sequence of statements (used for block bodies).
     fn run_body(&mut self, stmts: Vec<Stmt>) -> Result<(), RuntimeError> {
         for stmt in stmts {
@@ -1363,6 +1428,250 @@ impl Interpreter {
                 Ok(Value::Str(name.to_string()))
             }
 
+            "min" => {
+                let v = self.eval_args(args, 2)?;
+                min_max_numeric(v[0].clone(), v[1].clone(), true)
+            }
+
+            "max" => {
+                let v = self.eval_args(args, 2)?;
+                min_max_numeric(v[0].clone(), v[1].clone(), false)
+            }
+
+            "sqrt" => {
+                let v = self.eval_args(args, 1)?;
+                let n = numeric_to_f64(&v[0], "sqrt")?;
+                if n < 0.0 {
+                    return Err(RuntimeError::TypeError(
+                        "sqrt() requires a non-negative number".to_string(),
+                    ));
+                }
+                Ok(Value::Float(n.sqrt()))
+            }
+
+            "pow" => {
+                let mut v = self.eval_args(args, 2)?;
+                let right = v.pop().unwrap_or(Value::Null);
+                let left = v.pop().unwrap_or(Value::Null);
+                eval_pow(left, right)
+            }
+
+            "clamp" => {
+                let v = self.eval_args(args, 3)?;
+                clamp_numeric(v[0].clone(), v[1].clone(), v[2].clone())
+            }
+
+            "replace" => {
+                let v = self.eval_args(args, 3)?;
+                let s = self.expect_string_arg(&v[0], "replace", "value")?;
+                let find = self.expect_string_arg(&v[1], "replace", "find")?;
+                let repl = self.expect_string_arg(&v[2], "replace", "replace")?;
+                Ok(Value::Str(s.replace(&find, &repl)))
+            }
+
+            "split" => {
+                let v = self.eval_args(args, 2)?;
+                let s = self.expect_string_arg(&v[0], "split", "value")?;
+                let delim = self.expect_string_arg(&v[1], "split", "delimiter")?;
+                if delim.is_empty() {
+                    return Err(RuntimeError::TypeError(
+                        "split() delimiter cannot be empty".to_string(),
+                    ));
+                }
+                let parts: Vec<serde_json::Value> = s
+                    .split(&delim)
+                    .map(|p| serde_json::Value::String(p.to_string()))
+                    .collect();
+                Ok(Value::Json(serde_json::Value::Array(parts)))
+            }
+
+            "join" => {
+                let v = self.eval_args(args, 2)?;
+                let delim = self.expect_string_arg(&v[1], "join", "delimiter")?;
+                match &v[0] {
+                    Value::Json(serde_json::Value::Array(arr)) => {
+                        let mut parts = Vec::with_capacity(arr.len());
+                        for item in arr {
+                            match item {
+                                serde_json::Value::String(s) => parts.push(s.clone()),
+                                _ => {
+                                    return Err(RuntimeError::TypeError(
+                                        "join() array must contain strings".to_string(),
+                                    ))
+                                }
+                            }
+                        }
+                        Ok(Value::Str(parts.join(&delim)))
+                    }
+                    _ => Err(RuntimeError::TypeError(
+                        "join() requires a json array".to_string(),
+                    )),
+                }
+            }
+
+            "startswith" => {
+                let v = self.eval_args(args, 2)?;
+                let s = self.expect_string_arg(&v[0], "startswith", "value")?;
+                let prefix = self.expect_string_arg(&v[1], "startswith", "prefix")?;
+                Ok(Value::Boolean(s.starts_with(&prefix)))
+            }
+
+            "endswith" => {
+                let v = self.eval_args(args, 2)?;
+                let s = self.expect_string_arg(&v[0], "endswith", "value")?;
+                let suffix = self.expect_string_arg(&v[1], "endswith", "suffix")?;
+                Ok(Value::Boolean(s.ends_with(&suffix)))
+            }
+
+            "contains" => {
+                let v = self.eval_args(args, 2)?;
+                let s = self.expect_string_arg(&v[0], "contains", "value")?;
+                let needle = self.expect_string_arg(&v[1], "contains", "value")?;
+                Ok(Value::Boolean(s.contains(&needle)))
+            }
+
+            "keys" => {
+                let v = self.eval_args(args, 1)?;
+                match &v[0] {
+                    Value::Json(serde_json::Value::Object(map)) => {
+                        let keys: Vec<serde_json::Value> = map
+                            .keys()
+                            .map(|k| serde_json::Value::String(k.clone()))
+                            .collect();
+                        Ok(Value::Json(serde_json::Value::Array(keys)))
+                    }
+                    _ => Err(RuntimeError::TypeError(
+                        "keys() requires a json object".to_string(),
+                    )),
+                }
+            }
+
+            "values" => {
+                let v = self.eval_args(args, 1)?;
+                match &v[0] {
+                    Value::Json(serde_json::Value::Object(map)) => {
+                        let values: Vec<serde_json::Value> = map.values().cloned().collect();
+                        Ok(Value::Json(serde_json::Value::Array(values)))
+                    }
+                    _ => Err(RuntimeError::TypeError(
+                        "values() requires a json object".to_string(),
+                    )),
+                }
+            }
+
+            "has_key" => {
+                let v = self.eval_args(args, 2)?;
+                let key = self.expect_string_arg(&v[1], "has_key", "key")?;
+                match &v[0] {
+                    Value::Json(serde_json::Value::Object(map)) => {
+                        Ok(Value::Boolean(map.contains_key(&key)))
+                    }
+                    _ => Err(RuntimeError::TypeError(
+                        "has_key() requires a json object".to_string(),
+                    )),
+                }
+            }
+
+            "remove_at" => {
+                if args.len() != 2 {
+                    return Err(RuntimeError::RuntimeError(
+                        "remove_at() requires 2 arguments".to_string(),
+                    ));
+                }
+                let mut args = args;
+                let col_expr = args.remove(0);
+                let idx_expr = args.remove(0);
+                self.exec_remove_at(col_expr, idx_expr)
+            }
+
+            "type" => {
+                if args.len() != 1 {
+                    return Err(RuntimeError::RuntimeError(
+                        "type() requires 1 argument".to_string(),
+                    ));
+                }
+                let val = self.eval_expr_nullable(args.into_iter().next().unwrap())?;
+                Ok(Value::Str(val.type_name().to_string()))
+            }
+
+            "isnull" => {
+                if args.len() != 1 {
+                    return Err(RuntimeError::RuntimeError(
+                        "isnull() requires 1 argument".to_string(),
+                    ));
+                }
+                let val = self.eval_expr_nullable(args.into_iter().next().unwrap())?;
+                Ok(Value::Boolean(matches!(val, Value::Null)))
+            }
+
+            "exists" => {
+                let v = self.eval_args(args, 1)?;
+                let path = self.expect_string_arg(&v[0], "exists", "path")?;
+                let path = self.resolve_io_path(&path)?;
+                Ok(Value::Boolean(path.exists()))
+            }
+
+            "delete" => {
+                let v = self.eval_args(args, 1)?;
+                let path = self.expect_string_arg(&v[0], "delete", "path")?;
+                let path = self.resolve_io_path(&path)?;
+                if !path.exists() {
+                    return Err(RuntimeError::RuntimeError(
+                        "delete() path not found".to_string(),
+                    ));
+                }
+                if path.is_dir() {
+                    std::fs::remove_dir_all(&path).map_err(|e| {
+                        RuntimeError::IOError(format!("delete() failed for '{}': {e}", path.display()))
+                    })?;
+                } else {
+                    std::fs::remove_file(&path).map_err(|e| {
+                        RuntimeError::IOError(format!("delete() failed for '{}': {e}", path.display()))
+                    })?;
+                }
+                Ok(Value::Null)
+            }
+
+            "mkdir" => {
+                let v = self.eval_args(args, 1)?;
+                let path = self.expect_string_arg(&v[0], "mkdir", "path")?;
+                let path = self.resolve_io_path(&path)?;
+                std::fs::create_dir_all(&path).map_err(|e| {
+                    RuntimeError::IOError(format!("mkdir() failed for '{}': {e}", path.display()))
+                })?;
+                Ok(Value::Null)
+            }
+
+            "sleep" => {
+                let v = self.eval_args(args, 1)?;
+                let ms = match &v[0] {
+                    Value::Integer(n) if *n >= 0 => *n as u64,
+                    Value::Float(f) if *f >= 0.0 => *f as u64,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "sleep() requires a non-negative number".to_string(),
+                        ))
+                    }
+                };
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                Ok(Value::Null)
+            }
+
+            "env_exists" => {
+                let v = self.eval_args(args, 1)?;
+                let key = self.expect_string_arg(&v[0], "env_exists", "key")?;
+                let env_path = match &self.program_path {
+                    Some(p) => p
+                        .parent()
+                        .unwrap_or(std::path::Path::new("."))
+                        .join(".rundell.env"),
+                    None => return Err(RuntimeError::NoProgramPath),
+                };
+                let keys = rundell_env::env_list(&env_path)
+                    .map_err(|e| RuntimeError::IOError(format!("env_exists() failed: {e}")))?;
+                Ok(Value::Boolean(keys.iter().any(|k| k == &key)))
+            }
+
             "now" => {
                 if !args.is_empty() {
                     return Err(RuntimeError::RuntimeError(
@@ -1434,6 +1743,53 @@ impl Interpreter {
                     }
                 };
                 Ok(Value::DateTime(datetime_from_timestamp_ms(ms)?))
+            }
+
+            "dayofweek" => {
+                let v = self.eval_args(args, 1)?;
+                let dt = self.expect_datetime_arg(&v[0], "dayofweek", "datetime")?;
+                Ok(Value::Integer(dt.weekday().number_from_monday() as i64))
+            }
+
+            "adddays" => {
+                let v = self.eval_args(args, 2)?;
+                let dt = self.expect_datetime_arg(&v[0], "adddays", "datetime")?;
+                let days = match v[1] {
+                    Value::Integer(n) => n,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "adddays() requires integer days".to_string(),
+                        ))
+                    }
+                };
+                Ok(Value::DateTime(dt + ChronoDuration::days(days)))
+            }
+
+            "addhours" => {
+                let v = self.eval_args(args, 2)?;
+                let dt = self.expect_datetime_arg(&v[0], "addhours", "datetime")?;
+                let hours = match v[1] {
+                    Value::Integer(n) => n,
+                    _ => {
+                        return Err(RuntimeError::TypeError(
+                            "addhours() requires integer hours".to_string(),
+                        ))
+                    }
+                };
+                Ok(Value::DateTime(dt + ChronoDuration::hours(hours)))
+            }
+
+            "diffdays" => {
+                let v = self.eval_args(args, 2)?;
+                let left = self.expect_datetime_arg(&v[0], "diffdays", "left")?;
+                let right = self.expect_datetime_arg(&v[1], "diffdays", "right")?;
+                Ok(Value::Integer((left - right).num_days()))
+            }
+
+            "timezone" => {
+                let v = self.eval_args(args, 1)?;
+                let dt = self.expect_datetime_arg(&v[0], "timezone", "datetime")?;
+                Ok(Value::Str(dt.offset().to_string()))
             }
 
             "string" => {
@@ -2979,6 +3335,61 @@ fn parse_duration_ms_str(s: &str) -> Result<u64, RuntimeError> {
     ))
 }
 
+fn numeric_to_f64(value: &Value, func: &str) -> Result<f64, RuntimeError> {
+    match value {
+        Value::Integer(n) => Ok(*n as f64),
+        Value::Float(f) => Ok(*f),
+        Value::Currency(c) => Ok(currency_as_float(*c)),
+        other => Err(RuntimeError::TypeError(format!(
+            "{func}() requires numeric arguments, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn min_max_numeric(a: Value, b: Value, want_min: bool) -> Result<Value, RuntimeError> {
+    match (&a, &b) {
+        (Value::Integer(x), Value::Integer(y)) => {
+            let res = if want_min { x.min(y) } else { x.max(y) };
+            Ok(Value::Integer(*res))
+        }
+        (Value::Float(x), Value::Float(y)) => {
+            let res = if want_min { x.min(*y) } else { x.max(*y) };
+            Ok(Value::Float(res))
+        }
+        (Value::Currency(x), Value::Currency(y)) => {
+            let res = if want_min { x.min(y) } else { x.max(y) };
+            Ok(Value::Currency(*res))
+        }
+        _ => {
+            let af = numeric_to_f64(&a, "min/max")?;
+            let bf = numeric_to_f64(&b, "min/max")?;
+            let res = if want_min { af.min(bf) } else { af.max(bf) };
+            Ok(Value::Float(res))
+        }
+    }
+}
+
+fn clamp_numeric(val: Value, lo: Value, hi: Value) -> Result<Value, RuntimeError> {
+    match (&val, &lo, &hi) {
+        (Value::Integer(v), Value::Integer(l), Value::Integer(h)) => {
+            Ok(Value::Integer((*v).clamp(*l, *h)))
+        }
+        (Value::Float(v), Value::Float(l), Value::Float(h)) => {
+            Ok(Value::Float(v.clamp(*l, *h)))
+        }
+        (Value::Currency(v), Value::Currency(l), Value::Currency(h)) => {
+            Ok(Value::Currency((*v).clamp(*l, *h)))
+        }
+        _ => {
+            let v = numeric_to_f64(&val, "clamp")?;
+            let l = numeric_to_f64(&lo, "clamp")?;
+            let h = numeric_to_f64(&hi, "clamp")?;
+            Ok(Value::Float(v.clamp(l, h)))
+        }
+    }
+}
+
 fn parse_datetime_literal(s: &str) -> Result<DateTime<FixedOffset>, RuntimeError> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
@@ -3489,6 +3900,28 @@ fn is_builtin(name: &str) -> bool {
             | "trim"
             | "execute"
             | "os"
+            | "min"
+            | "max"
+            | "sqrt"
+            | "pow"
+            | "clamp"
+            | "replace"
+            | "split"
+            | "join"
+            | "startswith"
+            | "endswith"
+            | "contains"
+            | "keys"
+            | "values"
+            | "has_key"
+            | "remove_at"
+            | "type"
+            | "isnull"
+            | "exists"
+            | "delete"
+            | "mkdir"
+            | "sleep"
+            | "env_exists"
             | "now"
             | "day"
             | "month"
@@ -3499,6 +3932,11 @@ fn is_builtin(name: &str) -> bool {
             | "dateformat"
             | "timestamp"
             | "fromtimestamp"
+            | "dayofweek"
+            | "adddays"
+            | "addhours"
+            | "diffdays"
+            | "timezone"
             | "string"
             | "append"
             | "env"
