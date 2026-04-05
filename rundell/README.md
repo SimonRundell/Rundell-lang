@@ -16,7 +16,7 @@ define myForm as form -->
     define okBtn   as form\button.
     set nameBox\position = 10px, 10px, 300px, 28px.
     set nameBox\placeholder = "Enter your name".
-    set okBtn\position  = 10px, 50px, 100px, 30px.
+    set okBtn\position  = 50px, 10px, 100px, 30px.
     set okBtn\caption   = "Say Hello".
     set okBtn\click     = greet().
 <--
@@ -210,6 +210,14 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 
 ---
 
+## What's New in 0.1.5
+
+- New `datetime` type with ISO 8601 literals (pipe-delimited)
+- Datetime built-ins: `now`, `day`, `month`, `year`, `hour`, `minute`, `second`, `dateformat`
+- Datetime arithmetic support (`datetime +/- integer`, `datetime - datetime`)
+- Execute external programs with `execute(path)`
+- New examples: datetime basics, execute basics, and GUI clock
+
 ## What's New in 0.1.4
 
 - Named event timers (`eventtimer`) with `interval`, `running`, and `event`
@@ -218,14 +226,6 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 - GUI example: timer-driven label updates
 - GUI controls now support `font` and `fontsize`
 - Designer: Select controls can edit and emit `items`
-
-## What's New in 0.1.5
-
-- New `datetime` type with ISO 8601 literals (pipe-delimited)
-- Datetime built-ins: `now`, `day`, `month`, `year`, `hour`, `minute`, `second`, `dateformat`
-- Datetime arithmetic support (`datetime +/- integer`, `datetime - datetime`)
-- Execute external programs with `execute(path)`
-- New examples: datetime basics, execute basics, and GUI clock
 
 ## What's New in 0.1.3
 

@@ -286,6 +286,21 @@ A cast that cannot succeed (e.g. `cast("hello", integer)`) raises a TypeError.
 
 ---
 
+### ISO 8601 Format Tokens
+
+Use these tokens with `dateformat(format, datetime)`:
+
+| Token | Meaning | Example |
+|---|---|---|
+| `YYYY` | 4-digit year | `2026` |
+| `MM` | 2-digit month | `04` |
+| `DD` | 2-digit day | `05` |
+| `HH` | 24-hour | `17` |
+| `mm` | 2-digit minute | `41` |
+| `SS` | 2-digit second | `44` |
+| `ZZ` | Offset with colon | `-12:00` |
+| `Z` | Offset without colon | `-1200` |
+
 ## 11. Built-in Functions
 
 All built-ins are expressions and can appear anywhere a value is expected.

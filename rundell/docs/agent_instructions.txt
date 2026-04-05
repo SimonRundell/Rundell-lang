@@ -1,22 +1,3 @@
-Next feature is the ability to execute or call external programs or scripts if the user 
-has the appropriate permissions to call the script/executable.
+In this document I plan the next phase of the language.
 
-This can only be determined at runtime, and if the user does not have sufficient permissions
-a specific new exception should be raised.
 
-The new keyword for this is execute("path\to\script").
-The path to script is relative to the folder from which the .run code is executed, so folder hierarchies
-are to be employed ie ..\ and .\
-The $PATH environment variable should be checked and if the target code is found it should be executed.
-ie
-
-execute("calc.exe").
-
-would run Windows Calculator utility, as the path to that code is in the $PATH.
-
-As Linux uses forward slashes and Windows backward slashes, perhaps they can both be used (but not interchangably)
-so "path\to\script" and "path/to/script" resolve to the same destination but "/path\to/script" would raise A
-syntax error.
-
-If the script that is called outputs any text to stdout then that should be directed to the CLI window of the rundell code.
-This should prevent multiple windows being opened. 
