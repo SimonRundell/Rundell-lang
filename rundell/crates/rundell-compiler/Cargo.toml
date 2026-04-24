@@ -1,0 +1,11 @@
+[package]
+name    = "rundell-compiler"
+version = "0.1.6"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+rundell-parser = { path = "../rundell-parser" }
+rundell-lexer  = { path = "../rundell-lexer"  }
+serde_json     = "1"
+dirs-next      = "2"

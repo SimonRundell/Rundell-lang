@@ -7,4 +7,5 @@ members = [
     "crates/rundell-cli",
     "crates/rundell-gui",
     "crates/rundell-env",
+    "crates/rundell-compiler",
 ]

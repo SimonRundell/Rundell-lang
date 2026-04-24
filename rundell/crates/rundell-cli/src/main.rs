@@ -14,6 +14,7 @@ use clap::Parser as ClapParser;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
+use rundell_compiler;
 use rundell_interpreter::Interpreter;
 use rundell_parser::{format_parse_error, parse};
 use rundell_parser::ast::{Expr, SetOp, Stmt};
@@ -40,6 +41,14 @@ struct Cli {
     /// Delete a credential by key: --env-delete KEY
     #[arg(long = "env-delete")]
     env_delete: Option<String>,
+
+    /// Compile source file to a standalone debug binary: --compile <output-dir>
+    #[arg(long = "compile", value_name = "OUTPUT_DIR")]
+    compile: Option<PathBuf>,
+
+    /// Compile source file to a standalone release binary: --compile-release <output-dir>
+    #[arg(long = "compile-release", value_name = "OUTPUT_DIR")]
+    compile_release: Option<PathBuf>,
 }
 
 fn main() {
@@ -92,6 +101,20 @@ fn main() {
         return;
     }
 
+    // Compile flags — require a source file to be specified.
+    if cli.compile.is_some() || cli.compile_release.is_some() {
+        let release = cli.compile_release.is_some();
+        let out_dir = cli.compile_release.or(cli.compile).unwrap();
+        match cli.file {
+            Some(src_path) => compile_file(src_path, out_dir, release),
+            None => {
+                eprintln!("Error: --compile / --compile-release requires a source file.");
+                process::exit(1);
+            }
+        }
+        return;
+    }
+
     // Normal file / REPL mode.
     match cli.file {
         Some(path) => run_file(path),
@@ -104,6 +127,39 @@ fn env_file_path() -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(".rundell.env")
+}
+
+/// Compile a `.run` source file to a standalone binary.
+fn compile_file(src_path: PathBuf, out_dir: PathBuf, release: bool) {
+    let source = match std::fs::read_to_string(&src_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading '{}': {e}", src_path.display());
+            process::exit(1);
+        }
+    };
+
+    let src_dir = src_path.parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    if let Err(e) = rundell_compiler::compile(&source, &src_dir, &out_dir) {
+        eprintln!("Compile error: {e}");
+        process::exit(1);
+    }
+
+    println!("Generated Cargo project in '{}'", out_dir.display());
+
+    match rundell_compiler::build_project(&out_dir, release) {
+        Ok(binary) => {
+            let mode = if release { "release" } else { "debug" };
+            println!("Build succeeded ({mode}): {}", binary.display());
+        }
+        Err(e) => {
+            eprintln!("Build failed: {e}");
+            process::exit(1);
+        }
+    }
 }
 
 /// Read, parse, and execute a `.run` source file.
