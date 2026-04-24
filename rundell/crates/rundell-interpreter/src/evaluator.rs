@@ -5,6 +5,7 @@
 //! storage.
 
 use std::collections::HashMap;
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -303,6 +304,7 @@ impl Interpreter {
             Stmt::Define(d) => self.exec_define(d),
             Stmt::Set(s) => self.exec_set(s),
             Stmt::Print(expr) => self.exec_print(expr),
+            Stmt::Debug(path, expr) => self.exec_debug(path, expr),
             Stmt::Receive(r) => self.exec_receive(r),
             Stmt::If(i) => self.exec_if(i),
             Stmt::Switch(sw) => self.exec_switch(sw),
@@ -637,6 +639,36 @@ impl Interpreter {
         self.stdout
             .flush()
             .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+        Ok(())
+    }
+
+    fn exec_debug(&mut self, path_expr: Option<Expr>, msg_expr: Expr) -> Result<(), RuntimeError> {
+        let val = self.eval_expr(msg_expr)?;
+        let msg = match &val {
+            Value::Json(json) => serde_json::to_string_pretty(json)
+                .unwrap_or_else(|_| json.to_string()),
+            _ => val.to_display_string(),
+        };
+        let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let entry = format!("{timestamp}> {msg}");
+        match path_expr {
+            None => {
+                self.stdout
+                    .write_all(entry.as_bytes())
+                    .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+                self.stdout
+                    .flush()
+                    .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+            }
+            Some(pe) => {
+                let path_val = self.eval_expr(pe)?;
+                let path_str = path_val.to_display_string();
+                let existing = fs::read_to_string(&path_str).unwrap_or_default();
+                let new_content = format!("{entry}{existing}");
+                fs::write(&path_str, new_content)
+                    .map_err(|e| RuntimeError::IOError(e.to_string()))?;
+            }
+        }
         Ok(())
     }
 
@@ -3851,6 +3883,9 @@ fn coerce_string_to_type(s: &str, typ: &RundellType) -> Result<Value, RuntimeErr
             .map(Value::Json)
             .map_err(|_| RuntimeError::TypeError(format!("cannot coerce '{s}' to json"))),
         RundellType::DateTime => parse_datetime_literal(s).map(Value::DateTime),
+        RundellType::List(_) => serde_json::from_str(s)
+            .map(Value::Json)
+            .map_err(|_| RuntimeError::TypeError(format!("cannot coerce '{s}' to list"))),
     }
 }
 

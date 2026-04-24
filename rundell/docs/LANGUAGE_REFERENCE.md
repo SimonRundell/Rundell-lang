@@ -17,7 +17,7 @@ This document is the complete reference for the Rundell language.
 9. [Operators](#9-operators)
 10. [Type Casting](#10-type-casting)
 11. [Built-in Functions](#11-built-in-functions)
-12. [Input and Output](#12-input-and-output)
+12. [Input, Output and Debug](#12-input-output-and-debug)
 13. [Conditionals](#13-conditionals)
 14. [Loops](#14-loops)
 15. [Functions](#15-functions)
@@ -97,6 +97,7 @@ define x as integer = 5.   # inline comment after terminator
 | `currency` | Fixed 2 decimal places (stored as integer cents) | `9.99`, `1000.00` |
 | `boolean` | Logical true/false | `true`, `false`, `yes`, `no` |
 | `json` | Hierarchical key-value collection | `{ "key": [1, 2, 3] }` |
+| `list of <type>` | Ordered list of elements (stored as a JSON array) | `[]`, `["a", "b"]` |
 | `datetime` | ISO 8601 datetime with optional timezone offset | `|2026-04-04 17:41:44|`, `|2026-04-04T17:41:44-12:00|` |
 
 ---
@@ -382,13 +383,40 @@ print type(now()) + newline().
 - If `path` contains no separators, `$PATH` is searched.
 - Mixing `/` and `\` in the same path is a syntax error.
 
-## 12. Input and Output
+## 12. Input, Output and Debug
 
 ### Print
 ```
 print <expression>.
 ```
 Writes the string representation of the expression to stdout. No newline is appended automatically — use `newline()` explicitly.
+
+### Debug
+```
+debug <expression>.
+debug("<filePath>") <expression>.
+```
+
+Writes a timestamped diagnostic line. Every `debug` statement prefixes the output with the current local datetime:
+
+```
+YYYY-MM-DD HH:MM:SS> <expression value>
+```
+
+**To stdout** (omit the file path):
+```
+debug "The value is " + myVar + newline().
+```
+
+**To a file** (provide an absolute path as a string literal in parentheses):
+```
+debug("C:/logs/myapp.log") "The value is " + myVar + newline().
+```
+
+File output rules:
+- If the file does not exist it is created.
+- If the file already exists the new entry is **prepended** so the most recent entry is always at the top.
+- Use forward slashes (`/`) or double backslashes (`\\`) in file paths to avoid escape-sequence conflicts.
 
 ### Receive (input)
 ```
@@ -518,6 +546,16 @@ define myData as json = {
 }.
 ```
 
+Use `list of <type>` for a typed ordered list (functionally identical to a JSON array):
+
+```
+define names as list of string = [].
+append "Alice" to names.
+append "Bob"   to names.
+```
+
+`list of <type>` variables are stored and manipulated identically to `json` arrays. The type annotation documents intent but does not enforce element types at runtime.
+
 ### Access
 
 ```
@@ -529,7 +567,8 @@ myData["items"][0]    # → "alpha"
 ```
 set myData["newKey"] = "newValue".
 remove myData["oldKey"].
-append(myData["items"], "delta").
+append(myData["items"], "delta").   # function-call form
+append "delta" to myData["items"].  # natural-language form (equivalent)
 ```
 
 ### Building JSON from variables
@@ -1132,6 +1171,7 @@ if  else  switch  for  while  each  in  loops
 true  false  yes  no  TRUE  FALSE  YES  NO
 null  and  or  not  is
 print  receive  with  prompt
+debug  list  of  to
 try  catch  finally
 integer  float  string  currency  boolean  json
 datetime

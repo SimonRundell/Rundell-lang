@@ -157,6 +157,9 @@ fn stmt_uses_gui(stmt: &Stmt) -> bool {
             _ => false,
         },
         Stmt::Print(expr) => expr_uses_gui(expr),
+        Stmt::Debug(path, expr) => {
+            path.as_ref().map(expr_uses_gui).unwrap_or(false) || expr_uses_gui(expr)
+        }
         Stmt::Receive(_) => false,
         Stmt::If(i) => {
             expr_uses_gui(&i.condition)

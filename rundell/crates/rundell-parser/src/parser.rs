@@ -247,6 +247,7 @@ impl Parser {
             Some(Token::Define) => self.parse_define_or_funcdef(),
             Some(Token::Set) => self.parse_set(),
             Some(Token::Print) => self.parse_print(),
+            Some(Token::Debug) => self.parse_debug(),
             Some(Token::Receive) => self.parse_receive(),
             Some(Token::If) => self.parse_if(),
             Some(Token::Switch) => self.parse_switch(),
@@ -715,6 +716,30 @@ impl Parser {
         Ok(Stmt::Print(expr))
     }
 
+    // debug [("path")] <expr>.
+    fn parse_debug(&mut self) -> Result<Stmt, ParseError> {
+        self.expect(&Token::Debug)?;
+        // Optional file path: debug("path/to/file.txt") <expr>.
+        // Disambiguate: `(` followed by a StringLit is a path specifier.
+        let path = if self.check(&Token::LParen) {
+            // Peek one further to see if it looks like a path string.
+            let is_path = matches!(self.tokens.get(self.pos + 1), Some((Token::StringLit(_), _)));
+            if is_path {
+                self.advance(); // consume `(`
+                let path_expr = self.parse_expr()?;
+                self.expect(&Token::RParen)?;
+                Some(path_expr)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let msg = self.parse_expr()?;
+        self.expect_dot()?;
+        Ok(Stmt::Debug(path, msg))
+    }
+
     // receive <ident> [with prompt <expr>].
     fn parse_receive(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&Token::Receive)?;
@@ -1061,16 +1086,24 @@ impl Parser {
         Ok(Stmt::Remove(expr))
     }
 
-    // append(col, val).
+    // append(col, val).          ← function-call form
+    // append val to col.         ← natural-language form
     fn parse_append_stmt(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&Token::Append)?;
-        self.expect(&Token::LParen)?;
-        let col = self.parse_expr()?;
-        self.expect(&Token::Comma)?;
-        let val = self.parse_expr()?;
-        self.expect(&Token::RParen)?;
-        self.expect_dot()?;
-        Ok(Stmt::Append(col, val))
+        if self.eat(&Token::LParen) {
+            let col = self.parse_expr()?;
+            self.expect(&Token::Comma)?;
+            let val = self.parse_expr()?;
+            self.expect(&Token::RParen)?;
+            self.expect_dot()?;
+            Ok(Stmt::Append(col, val))
+        } else {
+            let val = self.parse_expr()?;
+            self.expect(&Token::KwTo)?;
+            let col = self.parse_expr()?;
+            self.expect_dot()?;
+            Ok(Stmt::Append(col, val))
+        }
     }
 
     // An expression used as a statement (bare function call).
@@ -1113,6 +1146,12 @@ impl Parser {
             Some(Token::KwDateTime) => {
                 self.advance();
                 Ok(RundellType::DateTime)
+            }
+            Some(Token::KwList) => {
+                self.advance();
+                self.expect(&Token::KwOf)?;
+                let inner = self.parse_type()?;
+                Ok(RundellType::List(Box::new(inner)))
             }
             Some(t) => Err(ParseError::UnexpectedToken {
                 found: format!("{t:?}"),
@@ -1294,6 +1333,10 @@ impl Parser {
                 Ok(expr)
             }
             Some(Token::LBrace) => self.parse_json_literal(),
+            Some(Token::LBracket) => {
+                let arr = self.parse_json_array()?;
+                Ok(Expr::JsonLiteral(arr))
+            }
             // Built-in functions / keywords used as calls
             Some(Token::Cast) => self.parse_builtin_call("cast"),
             Some(Token::Length) => self.parse_builtin_call("length"),

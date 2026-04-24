@@ -250,6 +250,9 @@ pub enum Token {
     /// `print`
     #[token("print")]
     Print,
+    /// `debug`
+    #[token("debug")]
+    Debug,
     /// `receive`
     #[token("receive")]
     Receive,
@@ -291,6 +294,15 @@ pub enum Token {
     /// `datetime` type keyword
     #[token("datetime")]
     KwDateTime,
+    /// `list` type keyword
+    #[token("list")]
+    KwList,
+    /// `of` keyword (used in `list of <type>`)
+    #[token("of")]
+    KwOf,
+    /// `to` keyword (used in `append val to col`)
+    #[token("to")]
+    KwTo,
 
     /// `cast` built-in
     #[token("cast")]

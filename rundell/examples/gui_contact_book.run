@@ -18,23 +18,23 @@ define bookForm as form -->
     set nameLbl\position   = 10px, 10px, 60px, 24px.
     set nameLbl\value      = "Name:".
 
-    set nameBox\position   = 80px, 10px, 220px, 28px.
+    set nameBox\position   = 10px, 80px, 220px, 28px.
     set nameBox\placeholder = "Full name".
 
-    set emailLbl\position  = 10px, 50px, 60px, 24px.
+    set emailLbl\position  = 50px, 10px, 60px, 24px.
     set emailLbl\value     = "Email:".
 
-    set emailBox\position  = 80px, 50px, 220px, 28px.
+    set emailBox\position  = 50px, 80px, 220px, 28px.
     set emailBox\placeholder = "email@example.com".
 
-    set addBtn\position    = 10px, 90px, 100px, 30px.
+    set addBtn\position    = 90px, 10px, 100px, 30px.
     set addBtn\caption     = "Add Contact".
     set addBtn\click       = addContact().
 
-    set contactList\position = 10px, 135px, 350px, 200px.
+    set contactList\position = 135px, 10px, 350px, 200px.
     set contactList\columns  = "Name,Email".
 
-    set statusLbl\position = 10px, 345px, 350px, 24px.
+    set statusLbl\position = 345px, 10px, 350px, 24px.
     set statusLbl\value    = "No contacts yet.".
 <--
 

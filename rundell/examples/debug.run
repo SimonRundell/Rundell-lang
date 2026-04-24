@@ -1,0 +1,5 @@
+# test of debugging print tracing
+
+define myVariable as string = "Simon".
+debug "The name in the variable is " + myVariable + newline().                  # log to screen
+debug("C:/debug.log") "The name in the variable is " + myVariable + newline().  # log to file

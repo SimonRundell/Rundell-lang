@@ -40,6 +40,7 @@ rootWindow\myForm\show().
 - [REPL](#repl)
 - [Language at a Glance](#language-at-a-glance)
 - [Further Reading](#further-reading)
+- [What's New in 0.1.6](#whats-new-in-016)
 - [What's New in 0.1.5](#whats-new-in-015)
 - [What's New in 0.1.4](#whats-new-in-014)
 - [What's New in 0.1.3](#whats-new-in-013)
@@ -118,7 +119,7 @@ Launch the interactive Read-Eval-Print Loop by running `rundell` with no argumen
 
 ```
 $ rundell
-Rundell 0.1.5  —  type 'exit' or Ctrl+D to quit
+Rundell 0.1.6  —  type 'exit' or Ctrl+D to quit
 > define x as integer = 10.
 > print string(x * 2) + newline().
 20
@@ -137,6 +138,8 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 | Variable declaration | `define age as integer = 21.` |
 | Assignment | `set age = age + 1.` |
 | Print | `print "Hello" + newline().` |
+| Debug | `debug "value=" + myVar + newline().` |
+| Debug to file | `debug("C:/logs/app.log") "value=" + myVar + newline().` |
 | Input | `receive name with prompt "Your name: ".` |
 | Conditional | `if (age >= 18) --> ... <--` |
 | Switch | `switch grade --> A : ... else : ... <--` |
@@ -210,6 +213,15 @@ Multi-line input is supported — the REPL accumulates lines until it sees a sta
 - [**Examples**](examples/) — ready-to-run sample programs (console and GUI)
 
 ---
+
+## What's New in 0.1.6
+
+- `debug` statement for timestamped diagnostic output
+- `debug "msg".` writes to stdout; `debug("path") "msg".` prepends to a log file
+- Output is prefixed with `YYYY-MM-DD HH:MM:SS> ` on every line
+- Log files are created if absent; new entries are prepended so the latest appears first
+- `list of <type>` type syntax for ordered lists (stored as JSON arrays)
+- Natural-language `append val to col.` syntax as an alternative to `append(col, val).`
 
 ## What's New in 0.1.5
 

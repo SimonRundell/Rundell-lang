@@ -19,6 +19,8 @@ pub enum RundellType {
     Json,
     /// ISO 8601 datetime with optional timezone offset.
     DateTime,
+    /// Ordered list of a given element type.
+    List(Box<RundellType>),
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +358,8 @@ pub enum Stmt {
     Set(SetStmt),
     /// `print expr`
     Print(Expr),
+    /// `debug [("path")] expr` — emit timestamped output to stdout or a file.
+    Debug(Option<Expr>, Expr),
     /// `receive identifier [with prompt expr]`
     Receive(ReceiveStmt),
     /// `if ... else if ... else ...`

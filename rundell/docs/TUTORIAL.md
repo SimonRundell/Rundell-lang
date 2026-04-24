@@ -35,6 +35,7 @@ This tutorial takes you from zero to a working knowledge of Rundell — includin
 27. [File I/O](#27-file-io)
 28. [Executing External Programs](#28-executing-external-programs)
 29. [Utility Built-ins](#29-utility-built-ins)
+30. [Debugging Your Programs](#30-debugging-your-programs)
 
 ---
 
@@ -1193,6 +1194,70 @@ print dateformat("HH", addhours(dt, 5)) + newline().
 print string(diffdays(adddays(dt, 2), dt)) + newline().
 print timezone(dt) + newline().
 ```
+
+---
+
+## 30. Debugging Your Programs
+
+The `debug` statement lets you emit timestamped diagnostic messages while your program runs, without mixing them in with `print` output.
+
+### Writing to stdout
+
+```
+define count as integer = 42.
+debug "count is " + string(count) + newline().
+```
+
+Output:
+```
+2026-04-24 10:11:25> count is 42
+```
+
+Every `debug` line is automatically prefixed with the current date and time in `YYYY-MM-DD HH:MM:SS>` format. No newline is added automatically — use `newline()` as shown.
+
+### Writing to a log file
+
+Pass an absolute file path (in parentheses) between `debug` and the message:
+
+```
+debug("C:/logs/myapp.log") "count is " + string(count) + newline().
+```
+
+- If the file does not exist it is created.
+- If the file already exists the new entry is **prepended**, so the latest log entry always appears at the top of the file.
+
+### Using debug in a function
+
+```
+define processName(name as string) returns string -->
+    debug "processName called with: " + name + newline().
+    define result as string = upper(name).
+    debug "processName returning: " + result + newline().
+    return result.
+<--
+
+define output as string = processName("simon").
+print output + newline().
+```
+
+Console output:
+```
+2026-04-24 10:11:25> processName called with: simon
+2026-04-24 10:11:25> processName returning: SIMON
+SIMON
+```
+
+### File paths on Windows
+
+Inside a Rundell string, `\n`, `\r`, and `\t` are recognised escape sequences (newline, carriage return, tab). Other backslash sequences are passed through literally, but to be safe use **forward slashes** in log file paths:
+
+```
+debug("C:/Users/Simon/Documents/app.log") "started" + newline().
+```
+
+### Tip — debug works in GUI programs too
+
+`debug` is available in both console and GUI programs. Use it to trace event-handler calls or inspect variable values while a form is open.
 
 ---
 
