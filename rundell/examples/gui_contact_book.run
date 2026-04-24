@@ -1,5 +1,6 @@
 # gui_contact_book.run
 # A simple contact-book form: add names and emails, view them in a list.
+# update: code now debugs input to the stdout
 # Run with:  rundell-gui gui_contact_book.run
 
 define contacts as list of string = [].
@@ -49,6 +50,8 @@ define addContact() returns null -->
 
     define entry as string = name + "," + email.
     append entry to contacts.
+    debug "Added " + name + " to contacts" + newline().
+    debug contacts + newline().
 
     set bookForm\nameBox\value  = "".
     set bookForm\emailBox\value = "".

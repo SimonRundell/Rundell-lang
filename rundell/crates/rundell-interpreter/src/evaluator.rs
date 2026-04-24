@@ -3565,6 +3565,15 @@ fn eval_arith(l: Value, r: Value, op: ArithOp) -> Result<Value, RuntimeError> {
     }
 }
 
+/// Convert any value to its display string (used for implicit string coercion in `+`).
+fn value_to_display(v: Value) -> String {
+    match v {
+        Value::Json(ref json) => serde_json::to_string_pretty(json)
+            .unwrap_or_else(|_| json.to_string()),
+        _ => v.to_display_string(),
+    }
+}
+
 /// Evaluate addition (may be string concatenation).
 fn eval_add(l: Value, r: Value) -> Result<Value, RuntimeError> {
     if matches!(l, Value::Null) || matches!(r, Value::Null) {
@@ -3574,14 +3583,8 @@ fn eval_add(l: Value, r: Value) -> Result<Value, RuntimeError> {
     }
     match (l, r) {
         (Value::Str(a), Value::Str(b)) => Ok(Value::Str(a + &b)),
-        (Value::Str(_), other) => Err(RuntimeError::TypeError(format!(
-            "string concatenation requires string operand, got {}",
-            other.type_name()
-        ))),
-        (other, Value::Str(_)) => Err(RuntimeError::TypeError(format!(
-            "string concatenation requires string operand, got {}",
-            other.type_name()
-        ))),
+        (Value::Str(a), other) => Ok(Value::Str(a + &value_to_display(other))),
+        (other, Value::Str(b)) => Ok(Value::Str(value_to_display(other) + &b)),
         (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
         (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
         (Value::Integer(a), Value::Float(b)) => Ok(Value::Float(a as f64 + b)),
