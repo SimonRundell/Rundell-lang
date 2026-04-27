@@ -608,6 +608,152 @@ fn rnd_debug_file(path: &str, msg: &str) {
     std::fs::write(path, format!("{entry}{existing}")).unwrap_or_else(|e| panic!("debug file write failed: {e}"));
 }
 
+// ── File operations ───────────────────────────────────────────
+fn rnd_file_copy_move(
+    op: &str, src: RVal, dst: RVal,
+    overwrite_older: bool, rename_duplicates: bool, new_only: bool,
+    include_children: bool, preserve_structure: bool,
+    after: Option<RVal>, before: Option<RVal>,
+) {
+    let source_str = match src { RVal::Str(s) => s, other => panic!("copy/move source must be string, got {}", other.type_name()) };
+    let dest_str   = match dst { RVal::Str(s) => s, other => panic!("copy/move dest must be string, got {}", other.type_name()) };
+    let after_st  = after.map(|v|  rnd_rval_to_systime(v, "after"));
+    let before_st = before.map(|v| rnd_rval_to_systime(v, "before"));
+    let (_, files) = rnd_glob_collect(&source_str, include_children);
+    std::fs::create_dir_all(&dest_str).unwrap_or_else(|e| panic!("cannot create dest '{dest_str}': {e}"));
+    let dest_root = std::path::Path::new(&dest_str);
+    for (abs_path, rel_path) in &files {
+        if !abs_path.is_file() { continue; }
+        if after_st.is_some() || before_st.is_some() {
+            let mtime = abs_path.metadata().and_then(|m| m.modified())
+                .unwrap_or_else(|e| panic!("cannot read mtime '{}': {e}", abs_path.display()));
+            if let Some(a) = after_st  { if mtime <= a { continue; } }
+            if let Some(b) = before_st { if mtime >= b { continue; } }
+        }
+        let dest_rel = if preserve_structure { rel_path.clone() }
+            else { rel_path.file_name().map(std::path::PathBuf::from).unwrap_or_else(|| rel_path.clone()) };
+        let dest_candidate = dest_root.join(&dest_rel);
+        if let Some(parent) = dest_candidate.parent() {
+            std::fs::create_dir_all(parent).unwrap_or_else(|e| panic!("mkdir '{}' failed: {e}", parent.display()));
+        }
+        let dest_file = if dest_candidate.exists() {
+            if new_only { continue; }
+            if overwrite_older {
+                let s = abs_path.metadata().and_then(|m| m.modified()).unwrap();
+                let d = dest_candidate.metadata().and_then(|m| m.modified()).unwrap();
+                if s <= d { continue; }
+                dest_candidate
+            } else if rename_duplicates {
+                rnd_unique_name(&dest_candidate)
+            } else {
+                dest_candidate
+            }
+        } else { dest_candidate };
+        if op == "copy" {
+            std::fs::copy(abs_path, &dest_file).unwrap_or_else(|e| panic!("copy failed: {e}"));
+        } else if std::fs::rename(abs_path, &dest_file).is_err() {
+            std::fs::copy(abs_path, &dest_file).unwrap_or_else(|e| panic!("move (copy) failed: {e}"));
+            std::fs::remove_file(abs_path).unwrap_or_else(|e| panic!("move (delete) failed: {e}"));
+        }
+    }
+}
+fn rnd_file_delete(path: RVal, include_children: bool, after: Option<RVal>, before: Option<RVal>) {
+    let path_str = match path { RVal::Str(s) => s, other => panic!("delete path must be string, got {}", other.type_name()) };
+    let after_st  = after.map(|v|  rnd_rval_to_systime(v, "after"));
+    let before_st = before.map(|v| rnd_rval_to_systime(v, "before"));
+    let has_glob = path_str.contains('*') || path_str.contains('?');
+    if !has_glob && after_st.is_none() && before_st.is_none() && !include_children {
+        let p = std::path::Path::new(&path_str);
+        if !p.exists() { panic!("delete: not found '{path_str}'"); }
+        if p.is_dir() { std::fs::remove_dir_all(p).unwrap_or_else(|e| panic!("delete failed: {e}")); }
+        else { std::fs::remove_file(p).unwrap_or_else(|e| panic!("delete failed: {e}")); }
+        return;
+    }
+    let (_, files) = rnd_glob_collect(&path_str, include_children);
+    for (abs_path, _) in &files {
+        if !abs_path.is_file() { continue; }
+        if after_st.is_some() || before_st.is_some() {
+            let mtime = abs_path.metadata().and_then(|m| m.modified())
+                .unwrap_or_else(|e| panic!("mtime failed: {e}"));
+            if let Some(a) = after_st  { if mtime <= a { continue; } }
+            if let Some(b) = before_st { if mtime >= b { continue; } }
+        }
+        std::fs::remove_file(abs_path).unwrap_or_else(|e| panic!("delete '{}' failed: {e}", abs_path.display()));
+    }
+}
+fn rnd_rval_to_systime(v: RVal, ctx: &str) -> std::time::SystemTime {
+    use std::time::{Duration, UNIX_EPOCH};
+    let ms: i64 = match v {
+        RVal::DateTime(dt) => dt.timestamp_millis(),
+        RVal::Str(s) => {
+            let trimmed = s.trim();
+            let full = if trimmed.len() == 10 { format!("{trimmed}T00:00:00") } else { trimmed.to_string() };
+            let dt = DateTime::parse_from_rfc3339(&full).unwrap_or_else(|_| {
+                let nd = chrono::NaiveDateTime::parse_from_str(&full, "%Y-%m-%dT%H:%M:%S")
+                    .unwrap_or_else(|_| panic!("{ctx}: invalid datetime '{s}'"));
+                use chrono::TimeZone;
+                let off = *Local::now().offset();
+                off.from_local_datetime(&nd).single().unwrap_or_else(|| panic!("{ctx}: ambiguous datetime '{s}'"))
+            });
+            dt.timestamp_millis()
+        }
+        other => panic!("{ctx} requires datetime/string, got {}", other.type_name()),
+    };
+    let secs = (ms.max(0) as u64) / 1000;
+    let sub_ms = (ms.max(0) as u64) % 1000;
+    UNIX_EPOCH + Duration::from_secs(secs) + Duration::from_millis(sub_ms)
+}
+fn rnd_glob_collect(source: &str, recursive: bool) -> (std::path::PathBuf, Vec<(std::path::PathBuf, std::path::PathBuf)>) {
+    let p = std::path::Path::new(source);
+    let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let (dir, pattern): (std::path::PathBuf, String) = if fname.contains('*') || fname.contains('?') {
+        (p.parent().map(|d| d.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from(".")), fname.to_string())
+    } else {
+        (p.to_path_buf(), "*".to_string())
+    };
+    let mut results = Vec::new();
+    rnd_glob_walk(&dir, &dir, &pattern, recursive, &mut results);
+    (dir, results)
+}
+fn rnd_glob_walk(base: &std::path::Path, dir: &std::path::Path, pattern: &str, recursive: bool, out: &mut Vec<(std::path::PathBuf, std::path::PathBuf)>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if rnd_glob_match(pattern.as_bytes(), name.as_bytes()) {
+                    let rel = path.strip_prefix(base).unwrap_or(&path).to_path_buf();
+                    out.push((path, rel));
+                }
+            } else if path.is_dir() && recursive {
+                rnd_glob_walk(base, &path, pattern, recursive, out);
+            }
+        }
+    }
+}
+fn rnd_glob_match(pat: &[u8], s: &[u8]) -> bool {
+    match (pat.first(), s.first()) {
+        (None, None) => true,
+        (None, _) => false,
+        (Some(b'*'), _) => rnd_glob_match(&pat[1..], s) || (!s.is_empty() && rnd_glob_match(pat, &s[1..])),
+        (Some(b'?'), Some(_)) => rnd_glob_match(&pat[1..], &s[1..]),
+        (Some(b'?'), None) => false,
+        (Some(p), Some(c)) if p == c => rnd_glob_match(&pat[1..], &s[1..]),
+        _ => false,
+    }
+}
+fn rnd_unique_name(path: &std::path::Path) -> std::path::PathBuf {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file").to_string();
+    let ext  = path.extension().and_then(|e| e.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
+    let dir  = path.parent().unwrap_or(std::path::Path::new("."));
+    let mut n = 1u32;
+    loop {
+        let c = dir.join(format!("{stem}_{n}{ext}"));
+        if !c.exists() { return c; }
+        n += 1;
+    }
+}
+
 // ── Collection mutation ───────────────────────────────────────
 fn rnd_append(col: &mut RVal, val: RVal) {
     match col {

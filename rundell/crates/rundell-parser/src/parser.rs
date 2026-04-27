@@ -9,7 +9,8 @@ use rundell_lexer::{lex, Token};
 
 use crate::ast::{
     AttemptBlock, AwaitExpr, BinOp, CatchClause, CmpOp, ControlType, CredentialsDefinition,
-    DefineStmt, DialogCall, EventTimerDefinition, Expr, ForEachStmt, ForLoopStmt, FormDefinition, FunctionDefStmt,
+    DefineStmt, DialogCall, EventTimerDefinition, Expr, FileCopyMoveOp, FileCopyMoveStmt,
+    FileDeleteStmt, FileOpSwitches, ForEachStmt, ForLoopStmt, FormDefinition, FunctionDefStmt,
     HttpMethod, IfStmt, Literal, MessageKind, Param, QueryDefinition, ReceiveStmt, RundellType,
     SetOp, SetStmt, SetTarget, Stmt, SwitchCase, SwitchPattern, SwitchStmt, TryCatchStmt,
     UnaryOp, WhileLoopStmt,
@@ -258,6 +259,8 @@ impl Parser {
             Some(Token::KwAttempt) => self.parse_attempt(),
             Some(Token::Remove) => self.parse_remove(),
             Some(Token::Append) => self.parse_append_stmt(),
+            Some(Token::KwMove) | Some(Token::KwCopy) => self.parse_copy_move_stmt(),
+            Some(Token::Delete) => self.parse_delete_stmt(),
             // Object-path expression statements (show/close calls, or bare
             // object-path calls that the interpreter dispatches at runtime).
             Some(Token::Ident(_)) => self.parse_expr_stmt(),
@@ -295,7 +298,6 @@ impl Parser {
             | Some(Token::Type)
             | Some(Token::IsNull)
             | Some(Token::Exists)
-            | Some(Token::Delete)
             | Some(Token::Mkdir)
             | Some(Token::Sleep)
             | Some(Token::EnvExists)
@@ -1104,6 +1106,117 @@ impl Parser {
             self.expect_dot()?;
             Ok(Stmt::Append(col, val))
         }
+    }
+
+    // ── File operation statements ─────────────────────────────────────────────
+
+    // Returns true when the token is a recognised file-operation switch keyword,
+    // used to distinguish `(switch ...)` blocks from function-call `(expr)` forms.
+    fn is_file_op_switch(t: &Token) -> bool {
+        matches!(
+            t,
+            Token::OverwriteOlder
+                | Token::RenameDuplicates
+                | Token::NewOnly
+                | Token::IncludeChildren
+                | Token::PreserveStructure
+                | Token::CollapseStructure
+        ) || matches!(t, Token::Ident(s) if s == "after" || s == "before")
+    }
+
+    // Parse the optional `(switch1, switch2, ...)` block that can prefix a file op.
+    // Only consumes tokens when the block contains recognised switch keywords.
+    fn parse_file_op_switches(&mut self) -> Result<FileOpSwitches, ParseError> {
+        let mut sw = FileOpSwitches::default();
+
+        // Peek: is there a '(' followed immediately by a switch keyword?
+        let has_switches = matches!(self.peek(), Some(Token::LParen))
+            && self
+                .peek_ahead(1)
+                .map_or(false, Self::is_file_op_switch);
+
+        if !has_switches {
+            return Ok(sw);
+        }
+
+        self.advance(); // consume '('
+        loop {
+            match self.peek().cloned() {
+                Some(Token::OverwriteOlder) => {
+                    self.advance();
+                    sw.overwrite_older = true;
+                }
+                Some(Token::RenameDuplicates) => {
+                    self.advance();
+                    sw.rename_duplicates = true;
+                }
+                Some(Token::NewOnly) => {
+                    self.advance();
+                    sw.new_only = true;
+                }
+                Some(Token::IncludeChildren) => {
+                    self.advance();
+                    sw.include_children = true;
+                }
+                Some(Token::PreserveStructure) => {
+                    self.advance();
+                    sw.preserve_structure = true;
+                }
+                Some(Token::CollapseStructure) => {
+                    self.advance(); // explicit collapse is the default — no-op
+                }
+                Some(Token::Ident(ref s)) if s == "after" => {
+                    self.advance();
+                    sw.after = Some(self.parse_expr()?);
+                }
+                Some(Token::Ident(ref s)) if s == "before" => {
+                    self.advance();
+                    sw.before = Some(self.parse_expr()?);
+                }
+                _ => break,
+            }
+            if !self.eat(&Token::Comma) {
+                break;
+            }
+        }
+        self.expect(&Token::RParen)?;
+        Ok(sw)
+    }
+
+    // copy [switches] source to dest.
+    // move [switches] source to dest.
+    fn parse_copy_move_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let op = match self.advance() {
+            Some(Token::KwCopy) => FileCopyMoveOp::Copy,
+            Some(Token::KwMove) => FileCopyMoveOp::Move,
+            _ => unreachable!("parse_copy_move_stmt called on non-copy/move token"),
+        };
+        let switches = self.parse_file_op_switches()?;
+        let source = self.parse_expr()?;
+        self.expect(&Token::KwTo)?;
+        let dest = self.parse_expr()?;
+        self.expect_dot()?;
+        Ok(Stmt::FileCopyMove(FileCopyMoveStmt {
+            op,
+            switches,
+            source,
+            dest,
+        }))
+    }
+
+    // delete [switches] path.        ← natural-language form (wildcards allowed)
+    // delete("path").                ← function-call form (no switches; for backwards compat,
+    //                                   treated identically to the natural-language form)
+    fn parse_delete_stmt(&mut self) -> Result<Stmt, ParseError> {
+        self.expect(&Token::Delete)?;
+
+        // Handle function-call form: delete("path").
+        // Distinguish from a switch block by checking whether '(' is followed by a
+        // switch keyword.  If not, the '(' belongs to the path expression.
+        let switches = self.parse_file_op_switches()?;
+        let path = self.parse_expr()?;
+        self.expect_dot()?;
+        Ok(Stmt::FileDelete(FileDeleteStmt { switches, path }))
     }
 
     // An expression used as a statement (bare function call).

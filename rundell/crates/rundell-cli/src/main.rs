@@ -265,6 +265,10 @@ fn stmt_uses_gui(stmt: &Stmt) -> bool {
             block.body.iter().any(stmt_uses_gui) || block.handler.iter().any(stmt_uses_gui)
         }
         Stmt::Import(_) => false,
+        Stmt::FileCopyMove(stmt) => {
+            [&stmt.source, &stmt.dest].iter().any(|e| expr_uses_gui(e))
+        }
+        Stmt::FileDelete(stmt) => expr_uses_gui(&stmt.path),
     }
 }
 

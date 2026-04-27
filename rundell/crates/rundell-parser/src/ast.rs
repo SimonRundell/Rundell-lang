@@ -347,6 +347,67 @@ pub struct TryCatchStmt {
     pub finally_body: Option<Vec<Stmt>>,
 }
 
+// ===========================================================================
+// File operation AST nodes
+// ===========================================================================
+
+/// Switches that modify the behaviour of a `copy`, `move`, or `delete` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileOpSwitches {
+    /// Overwrite destination only when the source file is newer than the destination.
+    pub overwrite_older: bool,
+    /// Only process files whose modification time is strictly after this datetime.
+    pub after: Option<Expr>,
+    /// Only process files whose modification time is strictly before this datetime.
+    pub before: Option<Expr>,
+    /// On a name collision, append `_1`, `_2`, … to the destination filename.
+    pub rename_duplicates: bool,
+    /// Skip files that already exist at the destination.
+    pub new_only: bool,
+    /// Recurse into subdirectories.
+    pub include_children: bool,
+    /// When recursing, preserve the source sub-tree structure in the destination.
+    /// When false (default) all matched files are placed directly in `dest`.
+    pub preserve_structure: bool,
+}
+
+impl Default for FileOpSwitches {
+    fn default() -> Self {
+        FileOpSwitches {
+            overwrite_older: false,
+            after: None,
+            before: None,
+            rename_duplicates: false,
+            new_only: false,
+            include_children: false,
+            preserve_structure: false,
+        }
+    }
+}
+
+/// Whether the file operation is a copy or a move.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileCopyMoveOp {
+    Copy,
+    Move,
+}
+
+/// A `copy [switches] source to dest.` or `move [switches] source to dest.` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileCopyMoveStmt {
+    pub op: FileCopyMoveOp,
+    pub switches: FileOpSwitches,
+    pub source: Expr,
+    pub dest: Expr,
+}
+
+/// A `delete [switches] path.` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileDeleteStmt {
+    pub switches: FileOpSwitches,
+    pub path: Expr,
+}
+
 /// A top-level statement in a Rundell program.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
@@ -405,6 +466,10 @@ pub enum Stmt {
     QueryDef(QueryDefinition),
     /// `attempt --> ... <-- catch id --> ... <--`
     Attempt(AttemptBlock),
+    /// `copy/move [switches] source to dest.`
+    FileCopyMove(FileCopyMoveStmt),
+    /// `delete [switches] path.`
+    FileDelete(FileDeleteStmt),
 }
 
 // ===========================================================================

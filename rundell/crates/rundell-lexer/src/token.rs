@@ -300,9 +300,33 @@ pub enum Token {
     /// `of` keyword (used in `list of <type>`)
     #[token("of")]
     KwOf,
-    /// `to` keyword (used in `append val to col`)
+    /// `to` keyword (used in `append val to col` and `copy/move ... to ...`)
     #[token("to")]
     KwTo,
+    /// `move` file operation keyword
+    #[token("move")]
+    KwMove,
+    /// `copy` file operation keyword
+    #[token("copy")]
+    KwCopy,
+    /// `overwrite-older` file operation switch
+    #[token("overwrite-older")]
+    OverwriteOlder,
+    /// `rename-duplicates` file operation switch
+    #[token("rename-duplicates")]
+    RenameDuplicates,
+    /// `new-only` file operation switch
+    #[token("new-only")]
+    NewOnly,
+    /// `include-children` file operation switch
+    #[token("include-children")]
+    IncludeChildren,
+    /// `preserve-structure` file operation switch
+    #[token("preserve-structure")]
+    PreserveStructure,
+    /// `collapse-structure` file operation switch (explicit form of default behaviour)
+    #[token("collapse-structure")]
+    CollapseStructure,
 
     /// `cast` built-in
     #[token("cast")]

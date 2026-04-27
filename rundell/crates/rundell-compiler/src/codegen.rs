@@ -371,6 +371,8 @@ impl CodeGen {
                 self.emit_line(&format!("let _ = {e};"));
             }
             Stmt::Import(_) => { /* already inlined */ }
+            Stmt::FileCopyMove(stmt) => self.emit_file_copy_move(stmt),
+            Stmt::FileDelete(stmt)   => self.emit_file_delete(stmt),
             // GUI / query / event-timer statements are not supported in compiled mode.
             Stmt::FormDef(_) | Stmt::EventTimerDef(_) | Stmt::DefineControl(_, _) => {
                 self.emit_line("panic!(\"GUI features are not supported in compiled mode\");");
@@ -379,6 +381,33 @@ impl CodeGen {
                 self.emit_line("panic!(\"REST query features are not supported in compiled mode\");");
             }
         }
+    }
+
+    fn emit_file_copy_move(&mut self, stmt: &FileCopyMoveStmt) {
+        let op = match stmt.op {
+            FileCopyMoveOp::Copy => "\"copy\"",
+            FileCopyMoveOp::Move => "\"move\"",
+        };
+        let src  = self.gen_expr(&stmt.source);
+        let dst  = self.gen_expr(&stmt.dest);
+        let ow   = stmt.switches.overwrite_older;
+        let rd   = stmt.switches.rename_duplicates;
+        let no   = stmt.switches.new_only;
+        let ic   = stmt.switches.include_children;
+        let ps   = stmt.switches.preserve_structure;
+        let after  = match &stmt.switches.after  { Some(e) => format!("Some({})", self.gen_expr(e)), None => "None".to_string() };
+        let before = match &stmt.switches.before { Some(e) => format!("Some({})", self.gen_expr(e)), None => "None".to_string() };
+        self.emit_line(&format!(
+            "rnd_file_copy_move({op}, {src}, {dst}, {ow}, {rd}, {no}, {ic}, {ps}, {after}, {before});"
+        ));
+    }
+
+    fn emit_file_delete(&mut self, stmt: &FileDeleteStmt) {
+        let path   = self.gen_expr(&stmt.path);
+        let ic     = stmt.switches.include_children;
+        let after  = match &stmt.switches.after  { Some(e) => format!("Some({})", self.gen_expr(e)), None => "None".to_string() };
+        let before = match &stmt.switches.before { Some(e) => format!("Some({})", self.gen_expr(e)), None => "None".to_string() };
+        self.emit_line(&format!("rnd_file_delete({path}, {ic}, {after}, {before});"));
     }
 
     fn emit_define(&mut self, d: &DefineStmt) {

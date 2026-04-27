@@ -14,9 +14,10 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, SecondsFormat, TimeZone, Duration as ChronoDuration, Datelike, Timelike, Utc};
 
 use rundell_parser::ast::{
-    BinOp, CmpOp, DefineStmt, DialogCall, EventTimerDefinition, Expr, ForEachStmt, ForLoopStmt,
-    FormDefinition, FunctionDefStmt, IfStmt, Literal, ReceiveStmt, RundellType,
-    SetOp, SetStmt, SetTarget, Stmt, SwitchPattern, TryCatchStmt, UnaryOp, WhileLoopStmt,
+    BinOp, CmpOp, DefineStmt, DialogCall, EventTimerDefinition, Expr, FileCopyMoveOp,
+    FileCopyMoveStmt, FileDeleteStmt, ForEachStmt, ForLoopStmt, FormDefinition, FunctionDefStmt,
+    IfStmt, Literal, ReceiveStmt, RundellType, SetOp, SetStmt, SetTarget, Stmt, SwitchPattern,
+    TryCatchStmt, UnaryOp, WhileLoopStmt,
 };
 use rundell_parser::parse;
 
@@ -368,6 +369,8 @@ impl Interpreter {
                 Ok(())
             }
             Stmt::Attempt(block) => self.exec_attempt(block),
+            Stmt::FileCopyMove(stmt) => self.exec_file_copy_move(stmt),
+            Stmt::FileDelete(stmt) => self.exec_file_delete(stmt),
         };
 
         if result.is_ok() {
@@ -3084,6 +3087,213 @@ impl Interpreter {
         Ok(())
     }
 
+    // ── File copy / move / delete ─────────────────────────────────────────────
+
+    fn exec_file_copy_move(&mut self, stmt: FileCopyMoveStmt) -> Result<(), RuntimeError> {
+        let source_str = self.eval_expr(stmt.source)?.to_display_string();
+        let dest_str   = self.eval_expr(stmt.dest)?.to_display_string();
+
+        let after_dt  = stmt.switches.after.map(|e| self.eval_expr(e)).transpose()?;
+        let before_dt = stmt.switches.before.map(|e| self.eval_expr(e)).transpose()?;
+        let after_ts  = after_dt.as_ref().map(value_to_system_time).transpose()?;
+        let before_ts = before_dt.as_ref().map(value_to_system_time).transpose()?;
+
+        let (_source_base, files) = self.collect_glob_files(
+            &source_str,
+            stmt.switches.include_children,
+        )?;
+
+        let dest_root = self.resolve_glob_path(&dest_str)?;
+        std::fs::create_dir_all(&dest_root).map_err(|e| {
+            RuntimeError::IOError(format!("cannot create destination '{}': {e}", dest_root.display()))
+        })?;
+
+        for (abs_path, rel_path) in files {
+            if !abs_path.is_file() {
+                continue;
+            }
+
+            // Time filters
+            if after_ts.is_some() || before_ts.is_some() {
+                let mtime = file_mtime(&abs_path)?;
+                if let Some(after) = after_ts {
+                    if mtime <= after { continue; }
+                }
+                if let Some(before) = before_ts {
+                    if mtime >= before { continue; }
+                }
+            }
+
+            // Resolve destination
+            let dest_rel = if stmt.switches.preserve_structure {
+                rel_path.clone()
+            } else {
+                rel_path.file_name().map(PathBuf::from).unwrap_or_else(|| rel_path.clone())
+            };
+            let dest_file = dest_root.join(&dest_rel);
+
+            // Ensure parent directory exists
+            if let Some(parent) = dest_file.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    RuntimeError::IOError(format!("cannot create dir '{}': {e}", parent.display()))
+                })?;
+            }
+
+            // Conflict resolution
+            let dest_file = if dest_file.exists() {
+                if stmt.switches.new_only {
+                    continue;
+                }
+                if stmt.switches.overwrite_older {
+                    let src_mt = file_mtime(&abs_path)?;
+                    let dst_mt = file_mtime(&dest_file)?;
+                    if src_mt <= dst_mt { continue; } // dest is newer — keep it
+                    dest_file
+                } else if stmt.switches.rename_duplicates {
+                    unique_dest_name(&dest_file)
+                } else {
+                    dest_file // overwrite (default)
+                }
+            } else {
+                dest_file
+            };
+
+            // Perform operation
+            match stmt.op {
+                FileCopyMoveOp::Copy => {
+                    std::fs::copy(&abs_path, &dest_file).map_err(|e| {
+                        RuntimeError::IOError(format!(
+                            "copy '{}' -> '{}' failed: {e}",
+                            abs_path.display(), dest_file.display()
+                        ))
+                    })?;
+                }
+                FileCopyMoveOp::Move => {
+                    // try rename first (fast, same-volume); fall back to copy+delete
+                    if std::fs::rename(&abs_path, &dest_file).is_err() {
+                        std::fs::copy(&abs_path, &dest_file).map_err(|e| {
+                            RuntimeError::IOError(format!(
+                                "move '{}' -> '{}' (copy stage) failed: {e}",
+                                abs_path.display(), dest_file.display()
+                            ))
+                        })?;
+                        std::fs::remove_file(&abs_path).map_err(|e| {
+                            RuntimeError::IOError(format!(
+                                "move '{}' (delete stage) failed: {e}",
+                                abs_path.display()
+                            ))
+                        })?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn exec_file_delete(&mut self, stmt: FileDeleteStmt) -> Result<(), RuntimeError> {
+        let path_str = self.eval_expr(stmt.path)?.to_display_string();
+
+        let after_dt  = stmt.switches.after.map(|e| self.eval_expr(e)).transpose()?;
+        let before_dt = stmt.switches.before.map(|e| self.eval_expr(e)).transpose()?;
+        let after_ts  = after_dt.as_ref().map(value_to_system_time).transpose()?;
+        let before_ts = before_dt.as_ref().map(value_to_system_time).transpose()?;
+
+        let has_glob = path_str.contains('*') || path_str.contains('?');
+        let has_filters = after_ts.is_some() || before_ts.is_some()
+            || stmt.switches.overwrite_older
+            || stmt.switches.new_only;
+
+        if !has_glob && !has_filters && !stmt.switches.include_children {
+            // Simple single-path delete — original behaviour
+            let path = self.resolve_glob_path(&path_str)?;
+            if !path.exists() {
+                return Err(RuntimeError::RuntimeError(format!(
+                    "delete: path not found '{}'",
+                    path.display()
+                )));
+            }
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path).map_err(|e| {
+                    RuntimeError::IOError(format!("delete '{}' failed: {e}", path.display()))
+                })?;
+            } else {
+                std::fs::remove_file(&path).map_err(|e| {
+                    RuntimeError::IOError(format!("delete '{}' failed: {e}", path.display()))
+                })?;
+            }
+            return Ok(());
+        }
+
+        let (_, files) = self.collect_glob_files(&path_str, stmt.switches.include_children)?;
+
+        for (abs_path, _) in files {
+            if !abs_path.is_file() {
+                continue;
+            }
+            if after_ts.is_some() || before_ts.is_some() {
+                let mtime = file_mtime(&abs_path)?;
+                if let Some(after) = after_ts {
+                    if mtime <= after { continue; }
+                }
+                if let Some(before) = before_ts {
+                    if mtime >= before { continue; }
+                }
+            }
+            std::fs::remove_file(&abs_path).map_err(|e| {
+                RuntimeError::IOError(format!("delete '{}' failed: {e}", abs_path.display()))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Resolve a path string (which may not contain globs) relative to the program directory.
+    fn resolve_glob_path(&self, raw: &str) -> Result<PathBuf, RuntimeError> {
+        let path = Path::new(raw);
+        if path.is_absolute() {
+            return Ok(path.to_path_buf());
+        }
+        if let Some(program_path) = &self.program_path {
+            let base = program_path.parent().unwrap_or(Path::new("."));
+            return Ok(base.join(path));
+        }
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .map_err(|e| RuntimeError::IOError(e.to_string()))
+    }
+
+    /// Expand a source pattern (which may contain `*`/`?` in the filename part)
+    /// into a list of `(absolute_path, path_relative_to_source_dir)` pairs.
+    fn collect_glob_files(
+        &self,
+        source: &str,
+        recursive: bool,
+    ) -> Result<(PathBuf, Vec<(PathBuf, PathBuf)>), RuntimeError> {
+        let source_path = Path::new(source);
+
+        // Split into (dir, filename_pattern)
+        let file_part = source_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        let has_glob = file_part.contains('*') || file_part.contains('?');
+
+        let (raw_dir, pattern): (PathBuf, String) = if has_glob {
+            let dir = source_path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+            (dir, file_part.to_string())
+        } else {
+            // No glob — treat the whole path as the directory
+            (source_path.to_path_buf(), "*".to_string())
+        };
+
+        let base_dir = self.resolve_glob_path(raw_dir.to_str().unwrap_or("."))?;
+
+        let mut results: Vec<(PathBuf, PathBuf)> = Vec::new();
+        collect_matching_files(&base_dir, &base_dir, &pattern, recursive, &mut results)
+            .map_err(|e| RuntimeError::IOError(format!("file scan failed: {e}")))?;
+
+        Ok((base_dir, results))
+    }
+
     fn resolve_io_path(&self, raw: &str) -> Result<PathBuf, RuntimeError> {
         let path = Path::new(raw);
         if path.is_absolute() {
@@ -4044,4 +4254,112 @@ fn json_value_to_csv(value: &serde_json::Value) -> String {
         serde_json::Value::Array(arr) => serde_json::Value::Array(arr.clone()).to_string(),
         serde_json::Value::Object(map) => serde_json::Value::Object(map.clone()).to_string(),
     }
+}
+
+// ── File operation helpers ────────────────────────────────────────────────────
+
+/// Convert a Rundell `Value` to a `std::time::SystemTime` for file-mtime comparisons.
+/// Accepts `Value::DateTime`, `Value::Str` (ISO 8601 date or datetime), and
+/// `Value::Integer` (Unix milliseconds).
+fn value_to_system_time(v: &Value) -> Result<std::time::SystemTime, RuntimeError> {
+    use std::time::{Duration, UNIX_EPOCH};
+    let dt: DateTime<FixedOffset> = match v {
+        Value::DateTime(dt) => *dt,
+        Value::Str(s) => {
+            // Accept "YYYY-MM-DD" (date only — treat as midnight local time) or full ISO datetime.
+            let trimmed = s.trim();
+            if trimmed.len() == 10 && trimmed.chars().nth(4) == Some('-') {
+                // Date-only: append T00:00:00
+                let full = format!("{trimmed}T00:00:00");
+                parse_datetime_literal(&full)?
+            } else {
+                parse_datetime_literal(trimmed)?
+            }
+        }
+        Value::Integer(ms) => datetime_from_timestamp_ms(*ms)?,
+        other => {
+            return Err(RuntimeError::TypeError(format!(
+                "after/before switch requires a datetime or date string, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let unix_ms = dt.timestamp_millis();
+    let (secs, millis) = if unix_ms >= 0 {
+        (unix_ms as u64 / 1000, unix_ms as u32 % 1000)
+    } else {
+        return Err(RuntimeError::TypeError("datetime before Unix epoch not supported for file filtering".to_string()));
+    };
+    Ok(UNIX_EPOCH + Duration::from_secs(secs) + Duration::from_millis(millis as u64))
+}
+
+/// Return the last-modified time of a file.
+fn file_mtime(path: &Path) -> Result<std::time::SystemTime, RuntimeError> {
+    path.metadata()
+        .and_then(|m| m.modified())
+        .map_err(|e| RuntimeError::IOError(format!("cannot read mtime for '{}': {e}", path.display())))
+}
+
+/// Given a destination path that already exists, find the next available name
+/// by appending `_1`, `_2`, … before the extension.
+fn unique_dest_name(path: &Path) -> PathBuf {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext  = path.extension().and_then(|e| e.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
+    let dir  = path.parent().unwrap_or(Path::new("."));
+    let mut n = 1u32;
+    loop {
+        let candidate = dir.join(format!("{stem}_{n}{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// True when `name` matches the glob `pattern` (supports `*` and `?`).
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    glob_match_impl(pattern.as_bytes(), name.as_bytes())
+}
+
+fn glob_match_impl(pat: &[u8], s: &[u8]) -> bool {
+    match (pat.first(), s.first()) {
+        (None, None) => true,
+        (None, _) => false,
+        (Some(b'*'), _) => {
+            // Try matching zero or more characters
+            glob_match_impl(&pat[1..], s) || (!s.is_empty() && glob_match_impl(pat, &s[1..]))
+        }
+        (Some(b'?'), Some(_)) => glob_match_impl(&pat[1..], &s[1..]),
+        (Some(b'?'), None) => false,
+        (Some(p), Some(c)) if p == c => glob_match_impl(&pat[1..], &s[1..]),
+        _ => false,
+    }
+}
+
+/// Recursively collect all files under `dir` whose names match `pattern`.
+/// Results are pushed as `(absolute_path, relative_path_from_base)`.
+fn collect_matching_files(
+    base: &Path,
+    dir: &Path,
+    pattern: &str,
+    recursive: bool,
+    results: &mut Vec<(PathBuf, PathBuf)>,
+) -> std::io::Result<()> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(()), // silently skip unreadable dirs
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if glob_matches(pattern, name) {
+                let rel = path.strip_prefix(base).unwrap_or(&path).to_path_buf();
+                results.push((path, rel));
+            }
+        } else if path.is_dir() && recursive {
+            collect_matching_files(base, &path, pattern, recursive, results)?;
+        }
+    }
+    Ok(())
 }
